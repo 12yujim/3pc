@@ -38,6 +38,7 @@ class ClientHandler(Thread):
                     if len(s) < 2:
                         continue
                     if s[0] == 'coordinator':
+                        print "coordinator " + s[1]
                         leader_lock.acquire()
                         leader = int(s[1])
                         leader_lock.release()
@@ -51,6 +52,8 @@ class ClientHandler(Thread):
                         wait_ack_lock.acquire()
                         wait_ack = False
                         wait_ack_lock.release()
+                    else:
+                        print s[0]
             except:
                 print sys.exc_info()
                 self.valid = False
