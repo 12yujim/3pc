@@ -16,8 +16,8 @@ PORT_BASE = 20000 # port_base
 
 class Client(object):
     def __init__(self, index, address, port):
-        self.leader = 0;
         self.index = index
+        self.library = {}
         self.valid = True
 
         self.master = socket(AF_INET, SOCK_STREAM)
@@ -39,7 +39,6 @@ class Client(object):
         self.send(self.master, "Making there")
         self.my_sock.listen(n)
         self.comm_channels = [self.my_sock, self.master]
-        
 
         self.vote = True
         self.crashAfterVote = False
@@ -107,11 +106,10 @@ class Client(object):
                 continue
             if s[0] == 'info':
                 # new process is asking for information, send leaderpid
-                if self.valid:
-                    self.send(sock, str(self.leader))
+                self.send(sock, self.leader)
 
     # Handles communication between normal servers and the coordinator.
-    def handle_coord_comm(self, sock,  data):
+    def handle_coord_comm(self, sock, data):
         pass
 
     # Handles communication between servers (coord or normal) and master
@@ -125,25 +123,33 @@ class Client(object):
                 if self.leader == self.index:
                     # begin vote process
                     if self.voteReq():
-                        self.send(sock, 'resp commit\n')
-                        # write to file
+                        self.send(sock, 'resp commit')
+                        # write to library
+                        self.library[s[1]] = s[2]
                     else:
-                        self.send('resp abort\n')
+                        self.send(self.master, 'resp abort')
                 else:
                     continue
             elif s[0] == 'delete':
                 if self.leader == self.index:
                     # begin vote process
                     if self.voteReq():
-                        self.send('resp commit\n')
-                        # delete from file
+                        self.send(self.master, 'resp commit')
+                        # delete from library
+                        if s[1] in self.library:
+                            del self.library[s[1]]
+                        else:
+                            pass
                     else:
-                        self.send('resp abort\n')
+                        self.send(self.master, 'resp abort')
                 else:
                     continue
             elif s[0] == 'get':
                 # return the song (lookup in playlist)
-                pass
+                if s[1] in self.library:
+                    self.send(self.master, 'resp ' + self.library[s[1]])
+                else:
+                    self.send(self.master, 'resp NONE')
             elif s[0] == 'crash':
                 #invoke crash
                 self.close()
@@ -169,16 +175,18 @@ class Client(object):
         if not self.vote:
             # short circuit because coordinator votes no
             return False
+        # send voteREQ to all participants and wait for response
         return True
 
     def send(self, sock, s):
         if self.valid:
             sock.send(str(s) + '\n')
 
-    def close(self, sock):
+    def close(self):
         try:
             self.valid = False
-            sock.close()
+            for s in sock.comm_channels:
+                 s.close()
         except:
             pass
 
