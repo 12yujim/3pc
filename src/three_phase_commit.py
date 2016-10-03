@@ -92,9 +92,19 @@ class Client(object):
                     self.send(connectSocket, "info " + str(self.index))
                 ans = connectSocket.recv(1024).split('\n')[0]
 
-                return int(ans)
+                lead = ans.split()[0]
+                if recover:
+                    lib  = ans.split()[1:]
+                    for key, value in [pair.split(',') for pair in lib]:
+                        self.library[key] = value
+
+                return int(lead)
             except:
                 continue
+
+        # We've experienced a total failure.
+        if recover:
+            pass
 
         return self.index
 
@@ -141,14 +151,14 @@ class Client(object):
 
     # Handles communication between normal servers.
     def handle_server_comm(self, sock, data):
-        global address
         line = data.split('\n')
         try:
             for l in line:
                 s = l.split()
                 if s[0] == 'info':
                     # new process is asking for information, send leaderpid
-                    self.send(sock, self.leader)
+
+                    self.send(sock, str(self.leader) + ' ' + ' '.join([key + "," + value for key,value in self.library.items()]))
                 if s[0] == 'voteREQ':
                     self.state = self.FIRSTVOTE
                     self.currCmd = s[1]
