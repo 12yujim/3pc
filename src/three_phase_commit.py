@@ -98,8 +98,6 @@ class Client(object):
                 continue
 
         lead = -1
-        intersection = []
-        running = []
         for i,sock in valid_contacts:
             try:
                 self.send(sock, 'info ' + str(self.index))
@@ -131,6 +129,7 @@ class Client(object):
 
 
         if not recover:
+            print "nor recover"
             return self.index
 
         # We've experienced a total failure. See if can decide what to do, if not wait for last process.
@@ -193,10 +192,10 @@ class Client(object):
                             if data == '':
                                 continue
                             if (sock == self.master):
-                                self.send(self.master, str(self.index) + ' received from master')
+                                #self.send(self.master, str(self.index) + ' received from master')
                                 self.handle_master_comm(sock, data)
                             else:
-                                self.send(self.master, str(self.index) + ' received from server')
+                                #self.send(self.master, str(self.index) + ' received from server')
                                 self.handle_server_comm(sock, data)
             except socket.timeout:
                 self.leader = self.leader + 1 % n
@@ -241,8 +240,7 @@ class Client(object):
                     # send vote
                     self.send(sock, self.vote)
                     if self.crashAfterVote:
-                        self.close()
-                        return
+                        sys.exit(0)
                     self.vote = True
                     self.state = self.PRECOMMIT
                 elif s[0] == 'precommit':
@@ -252,8 +250,7 @@ class Client(object):
                         logfile.write('ack\n')
                     self.send(sock, 'ack')
                     if self.crashAfterAck:
-                        self.close()
-                        return
+                        sys.exit(0)
                     self.state = self.ACKNOWLEDGE
                 elif s[0] == 'commit':
                     # write to log
@@ -277,7 +274,7 @@ class Client(object):
     # Handles communication between servers (coord or normal) and master
     def handle_master_comm(self, sock, data):
         line = data.split('\n')
-        self.send(self.master, "Received master comm " + data)
+        #self.send(self.master, "Received master comm " + data)
         for l in line:
             s = l.split()
             if s[0] == 'add':
@@ -313,7 +310,6 @@ class Client(object):
                     self.send(self.master, 'resp NONE')
             elif s[0] == 'crash':
                 #invoke crash
-                self.close()
                 sys.exit(0)
             elif s[0] == 'vote':
                 if s[1] == 'NO':
@@ -398,7 +394,7 @@ class Client(object):
         # VOTING #
         ##########
         if self.crashAfterVote:
-            self.close()
+            sys.exit(0)
             return
         acks = 0
         while (acks != len(p_sock)):
@@ -446,13 +442,18 @@ class Client(object):
         # all processes voted yes
         with open(self.log, 'a') as logfile:
             logfile.write('precommit\n')
-        for i in p_sock:
+        for i,s in zip(participants, p_sock):
             try:
-                # move to precommit stage
-                self.send(i, 'precommit')
+                if not self.crashPartialPreCommit[0]:
+                    self.send(s, 'precommit')
+                    continue
+
+                if self.crashPartialPreCommit[0] and (int(i) in self.crashPartialPreCommit[1]):
+                    self.send(s, 'precommit')
             except:
-                # ???
                 continue
+        if self.crashPartialPreCommit[0]:
+            sys.exit(0)
 
         #############
         # PRECOMMIT #
@@ -460,7 +461,7 @@ class Client(object):
         with open(self.log, 'a') as logfile:
             logfile.write('ack\n')
         if self.crashAfterAck:
-            self.close()
+            sys.exit(0)
             return
         acks = 0
         while (acks != len(p_sock)):
@@ -499,11 +500,18 @@ class Client(object):
         ##########
         with open(self.log, 'a') as logfile:
             logfile.write('commit\n')
-        for i in p_sock:
+        for i,s in zip(participants, p_sock):
             try:
-                self.send(i, 'commit')
+                if not self.crashPartialCommit[0]:
+                    self.send(s, 'commit')
+                    continue
+
+                if self.crashPartialCommit[0] and (int(i) in self.crashPartialCommit[1]):
+                    self.send(s, request)
             except:
                 continue
+        if self.crashPartialCommit[0]:
+            sys.exit(0)
         return success
 
     def abort(self):
