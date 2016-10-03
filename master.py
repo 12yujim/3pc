@@ -38,7 +38,6 @@ class ClientHandler(Thread):
                     if len(s) < 2:
                         continue
                     if s[0] == 'coordinator':
-                        print "coordinator " + s[1]
                         leader_lock.acquire()
                         leader = int(s[1])
                         leader_lock.release()

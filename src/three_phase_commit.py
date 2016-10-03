@@ -6,6 +6,7 @@ The master program for CS5414 three phase commit project.
 import sys, os
 import subprocess
 import time
+import socket
 from threading import Thread, Lock
 from socket import SOCK_STREAM, socket, AF_INET, SOL_SOCKET, SO_REUSEADDR
 from select import select
@@ -37,10 +38,16 @@ class Client(object):
         self.master.setsockopt(SOL_SOCKET, SO_REUSEADDR, 1)
 
         # Read from the data log and see if this is the first time.
-        self.log = open("log" + str(self.index) + ".txt", 'w+')
-        store = self.log.readline().split()
+        self.log = "log" + str(self.index) + ".txt"
+        store = ''
+        try:
+            with open(self.log, 'r') as logfile:
+                store = logfile.readline().split()
+        except:
+            with open(self.log, 'w') as logfile:
+                pass
         for [key,value] in [pair.split(',') for pair in store]:
-            self.library['key'] = value
+            self.library[key] = value
 
         # If there was no store we are starting the servers.
         # Otherwise we're recovering from a crash and need to request state.
@@ -82,7 +89,7 @@ class Client(object):
                 connectSocket = socket(AF_INET, SOCK_STREAM)
                 connectSocket.connect((address, self.PORT_BASE + i))
                 if self.valid:
-                    connectSocket.send("info " + str(self.index) + "\n")
+                    self.send(connectSocket, "info " + str(self.index))
                 ans = connectSocket.recv(1024).split('\n')[0]
 
                 return int(ans)
@@ -92,10 +99,14 @@ class Client(object):
         return self.index
 
     def run(self):
+        global address
         while self.valid:
             try:
                 # listen for input from all channels
-                (active, _, _) = select(self.comm_channels, [], [])
+                if self.state == self.IDLE:
+                    (active, _, _) = select(self.comm_channels, [], [])
+                else:
+                    (active, _, _) = select(self.comm_channels, [], [], 500)
 
                 for sock in active:
                     # We are receving a new connection, so accept it.
@@ -116,6 +127,13 @@ class Client(object):
                             else:
                                 #self.send(self.master, str(self.index) + ' received from server')
                                 self.handle_server_comm(sock, data)
+            except timeout:
+                self.leader = self.leader + 1 % n
+                if self.index == self.leader:
+                    # you are new coordinator
+                    self.send(self.master, 'coordinator ' + str(self.index))
+                # abort current protocol
+                self.abort()
             except:
                 #self.send(self.master, 'exception???')
                 self.close()
@@ -132,23 +150,34 @@ class Client(object):
                     # new process is asking for information, send leaderpid
                     self.send(sock, self.leader)
                 if s[0] == 'voteREQ':
-                    #self.send(self.master, 'data ' + s[2])
                     self.state = self.FIRSTVOTE
                     self.currCmd = s[1]
                     self.currData = s[2]
-                    # write to DT log
                     self.others = list(s[3])
-                    # write participants to DT log
-                    # write vote to DT log
+                    # write to DT log
+                    with open(self.log, 'w') as logfile:
+                        for songName in self.library:
+                            logfile.write('%s,%s ' % (songName, self.library[songName]))
+                        logfile.write('\n')
+                        logfile.write('START_3PC %s,%s' % (self.currCmd, self.currData))
+                        logfile.write('\n')
+                        logfile.write(','.join(self.others) + '\n')
+                        vote = 'yes' if self.vote else 'no'
+                        logfile.write(vote + '\n')
                     # send vote
                     self.send(sock, self.vote)
                     self.state = self.PRECOMMIT
                 elif s[0] == 'precommit':
                     # write to log
+                    with open(self.log, 'a') as logfile:
+                        logfile.write('precommit\n')
+                        logfile.write('ack\n')
                     self.send(sock, 'ack')
                     self.state = self.ACKNOWLEDGE
                 elif s[0] == 'commit':
                     # write to log
+                    with open(self.log, 'a') as logfile:
+                        logfile.write('commit\n')
                     songName = self.currData.split(',')[0]
                     if self.currCmd == 'delete':
                         if songName in self.library:
@@ -156,7 +185,9 @@ class Client(object):
                     if self.currCmd == 'add':
                         url = self.currData.split(',')[1]
                         self.library[songName] = url
-                else:
+                elif s[0] == 'abort':
+                    with open(self.log, 'a') as logfile:
+                        logfile.write('abort\n')
                     self.abort()
         except:
             #self.send(self.master, 'failure complete')
@@ -169,9 +200,6 @@ class Client(object):
             s = l.split()
             if len(s) < 2:
                 continue
-            if s[0] == 'status':
-                # delete this command
-                self.send(self.master, str(self.index) + ' alive')
             if s[0] == 'add':
                 if self.leader == self.index:
                     # begin vote process
@@ -221,39 +249,68 @@ class Client(object):
                 pass
             elif s[0] == 'crashPretialCommit':
                 pass
+            elif s[0] == 'status':
+                # delete this command
+                self.send(self.master, str(self.index) + ' alive')
 
 
     def voteReq(self, cmd, data):
         global n, address
+        self.currCmd = cmd
+        self.currData = data
         # return True if all processes vote commit, else return False
         success = True
+        with open(self.log, 'w') as logfile:
+            for songName in self.library:
+                logfile.write('%s,%s ' % (songName, self.library[songName]))
+            logfile.write('\n')
+            logfile.write('START_3PC %s,%s' % (self.currCmd, self.currData))
+            logfile.write('\n')
         if not self.vote:
             # short circuit because coordinator votes no
+            with open(self.log, 'a') as logfile:
+                logfile.write(str(self.index) + '\n')
+                logfile.write('abort\n')
             return False
+
+        #########
+        # START #
+        #########
         # send voteREQ to all participants and wait for response
         request = 'voteREQ ' + cmd + ' ' + data + ' '
         p_sock = []
-        participants = []
+        participants = [str(self.index)]
         for i in xrange(n):
             try:
                 if i == self.index:
                     continue
+                # connect to and keep track of participants
                 connectSocket = socket(AF_INET, SOCK_STREAM)
                 connectSocket.connect((address, self.PORT_BASE + i))
                 p_sock.append(connectSocket)
                 participants.append(str(i))
             except:
                 continue
+        # inform participants of all participants
         request += ''.join(participants)
+        with open(self.log, 'a') as logfile:
+            logfile.write(','.join(participants) + '\n')
+            vote = 'yes' if self.vote else 'no'
+            logfile.write(vote + '\n')
         # sent out all requests, inform participants of all other participants
         for i in p_sock:
             try:
                 self.send(i, request)
             except:
                 continue
+
+        ##########
+        # VOTING #
+        ##########
         acks = 0
-        while (acks != len(participants)):
+        while (acks != len(p_sock)):
             # add timeout
+            # wait for participants to send votes
             (active, _, _) = select(p_sock, [], [])
             for sock in active:
                 data = sock.recv(1024).split('\n')
@@ -261,26 +318,50 @@ class Client(object):
                     if votes == '':
                         continue
                     if (votes == 'False'):
+                        # participant voted false
                         success = False
+                    # received a response
                     acks += 1
             if not success:
+                # decide abort
+                with open(self.log, 'a') as logfile:
+                    logfile.write('abort\n')
                 break
         if not success:
+            # send abort to all participants
             for i in p_sock:
                 try:
                     self.send(i, 'abort')
-                    self.abort()
                 except:
+                    # participant failure
                     continue
+            # abort self and let master know
+            self.abort()
             return success
+
+        ###################
+        # ENTER PRECOMMIT #
+        ###################
+        # all processes voted yes
+        with open(self.log, 'a') as logfile:
+            logfile.write('precommit\n')
         for i in p_sock:
             try:
+                # move to precommit stage
                 self.send(i, 'precommit')
             except:
+                # ???
                 continue
+
+        #############
+        # PRECOMMIT #
+        #############
+        with open(self.log, 'a') as logfile:
+            logfile.write('ack\n')
         acks = 0
-        while (acks != len(participants)):
+        while (acks != len(p_sock)):
             # add timeout
+            # wait for acks in precommit stage
             (active, _, _) = select(p_sock, [], [])
             for sock in active:
                 data = sock.recv(1024).split('\n')
@@ -288,8 +369,12 @@ class Client(object):
                     if votes == '':
                         continue
                     if (votes == 'ack'):
+                        # received ack
                         acks += 1
-        if (acks != len(participants)):
+        if (acks != len(p_sock)):
+            with open(self.log, 'a') as logfile:
+                logfile.write('abort\n')
+            # did not receive ack from everyone
             success = False
             for i in p_sock:
                 try:
@@ -297,6 +382,12 @@ class Client(object):
                 except:
                     continue
             self.abort()
+
+        ##########
+        # COMMIT #
+        ##########
+        with open(self.log, 'a') as logfile:
+            logfile.write('commit\n')
         for i in p_sock:
             try:
                 self.send(i, 'commit')
@@ -315,6 +406,7 @@ class Client(object):
             sock.send(str(s) + '\n')
 
     def close(self):
+        self.log.close()
         try:
             self.valid = False
             for s in sock.comm_channels:
