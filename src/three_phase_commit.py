@@ -30,6 +30,7 @@ class Client(object):
         self.state = self.IDLE
         self.currCmd = None
         self.currData = None
+        self.others = None
 
         self.master = socket(AF_INET, SOCK_STREAM)
         self.my_sock = socket(AF_INET, SOCK_STREAM)
@@ -65,7 +66,7 @@ class Client(object):
         self.crashAfterVote = False
         self.crashAfterAck = False
 
-        #self.dtLog = open('dt' + self.index, 'a+')
+        self.dtLog = 'dt' + str(self.index)
 
     def initialize_socket(self, sock, port):
         global address
@@ -97,7 +98,6 @@ class Client(object):
         while self.valid:
             try:
                 # listen for input from all channels
-
                 (active, _, _) = select(self.comm_channels, [], [])
 
                 for sock in active:
@@ -107,20 +107,19 @@ class Client(object):
                         self.comm_channels.append(newsock)
                     else:
                         # Are we communicating with master, coord, or other servers?
-                        data = sock.recv(1024).strip()
-                        self.send(self.master, str(self.index) + ' ' + data)
-                        self.send(self.master, str(sock.getsockname()) + ' peername')
-                        if (data == ''):
-                            self.comm_channels.remove(sock)
-                        if (sock == self.master):
-                            self.send(self.master, str(self.index) + ' received from master')
-                            self.handle_master_comm(sock, data)
-                        elif (sock.getsockname()[1] == self.leader):
-                            self.send(self.master, str(self.index) + ' received from coordinator')
-                            self.handle_coord_comm(sock, data)
-                        else:
-                            self.send(self.master, str(self.index) + ' received from other')
-                            self.handle_server_comm(sock, data)
+                        line = sock.recv(1024).split('\n')
+                        for data in line:
+                            if data == '':
+                                continue
+                            self.send(self.master, str(self.index) + ' ' + data)
+                            if (data == ''):
+                                self.comm_channels.remove(sock)
+                            if (sock == self.master):
+                                self.send(self.master, str(self.index) + ' received from master')
+                                self.handle_master_comm(sock, data)
+                            else:
+                                self.send(self.master, str(self.index) + ' received from server')
+                                self.handle_server_comm(sock, data)
             except:
                 #self.send(self.master, 'exception???')
                 self.close()
@@ -128,29 +127,22 @@ class Client(object):
 
     # Handles communication between normal servers.
     def handle_server_comm(self, sock, data):
-        line = data.split('\n')
-        for l in line:
-            s = l.split()
-            if len(s) < 2:
-                continue
-            if s[0] == 'info':
-                # new process is asking for information, send leaderpid
-                self.send(sock, self.leader)
-
-    # Handles communication between normal servers and the coordinator.
-    def handle_coord_comm(self, sock, data):
+        global address
         line = data.split('\n')
         try:
             for l in line:
                 s = l.split()
+                if s[0] == 'info':
+                    # new process is asking for information, send leaderpid
+                    self.send(sock, self.leader)
                 if s[0] == 'voteREQ':
+                    self.send(self.master, 'data ' + s[2])
                     self.state = self.FIRSTVOTE
                     self.currCmd = s[1]
-                    self.currData = ','.join(s[2:])
-                    self.send(self.master, 'we made it')
+                    self.currData = s[2]
                     # write to DT log
-                #elif s[0] == 'participants':
-                 #   others = list(s[1])
+                    self.others = list(s[3])
+                    self.send(self.master, 'we made it')
                     # write participants to DT log
                     # write vote to DT log
                     # send vote
@@ -162,17 +154,18 @@ class Client(object):
                     self.state = self.ACKNOWLEDGE
                 elif s[0] == 'commit':
                     # write to log
-                    songName = self.data.split(',')[0]
-                    if self.cmd == 'delete':
+                    songName = self.currData.split(',')[0]
+                    if self.currCmd == 'delete':
                         if songName in self.library:
                             del self.library[songName]
-                    if self.cmd == 'add':
-                        url = self.data.split(',')[1]
+                    if self.currCmd == 'add':
+                        url = self.currData.split(',')[1]
                         self.library[songName] = url
                 else:
                     self.abort()
         except:
-            self.send(self.master, 'failure complete')
+            #self.send(self.master, 'failure complete')
+            pass
 
     # Handles communication between servers (coord or normal) and master
     def handle_master_comm(self, sock, data):
@@ -242,7 +235,8 @@ class Client(object):
             # short circuit because coordinator votes no
             return False
         # send voteREQ to all participants and wait for response
-        request = 'voteREQ ' + cmd + ' ' + data
+        request = 'voteREQ ' + cmd + ' ' + data + ' '
+        p_sock = []
         participants = []
         for i in xrange(n):
             try:
@@ -250,66 +244,76 @@ class Client(object):
                     continue
                 connectSocket = socket(AF_INET, SOCK_STREAM)
                 connectSocket.connect((address, self.PORT_BASE + i))
-                if self.valid:
-                    self.send(connectSocket, request)
-                participants.append(connectSocket)
+                p_sock.append(connectSocket)
+                participants.append(str(i))
             except:
                 continue
+        request += ''.join(participants)
         # sent out all requests, inform participants of all other participants
-        # for i in participants:
-        #     try:
-        #         self.send(i, 'participants ' + ''.join(particpiants))
-        #     except:
-        #         continue
+        for i in p_sock:
+            try:
+                self.send(i, request)
+            except:
+                continue
         acks = 0
-        while (acks < len(participants)):
+        while (acks != len(participants)):
             # add timeout
-            votes = self.my_sock.recv(1024).split('\n')
-            for vote in votes:
-                self.send(self.master, 'waiting for acks')
-                if (vote == 'False'):
-                    success = False
-                acks += 1
+            (active, _, _) = select(p_sock, [], [])
+            for sock in active:
+                data = sock.recv(1024).split('\n')
+                for votes in data:
+                    if votes == '':
+                        continue
+                    self.send(self.master, 'got 1')
+                    if (votes == 'False'):
+                        success = False
+                    acks += 1
             if not success:
                 break
-        # if not success:
-        #     for i in participants:
-        #         try:
-        #             self.send(i, 'abort')
-        #             self.abort()
-        #         except:
-        #             continue
-        #     return success
-        # for i in participants:
-        #     try:
-        #         self.send(i, 'precommit')
-        #     except:
-        #         continue
-        # acks = 0
-        # while (acks != len(participants)):
-        #     # add timeout
-        #     vote = self.my_sock.recv(1024)
-        #     if vote == 'ack':
-        #         acks += 1
-        # if (acks != len(participants)):
-        #     success = False
-        #     for i in participants:
-        #         try:
-        #             self.send(i, 'abort')
-        #         except:
-        #             continue
-        #     self.abort()
-        # for i in participants:
-        #     try:
-        #         self.send(i, 'commit')
-        #     except:
-        #         continue
+        if not success:
+            for i in p_sock:
+                try:
+                    self.send(i, 'abort')
+                    self.abort()
+                except:
+                    continue
+            return success
+        for i in p_sock:
+            try:
+                self.send(i, 'precommit')
+            except:
+                continue
+        acks = 0
+        while (acks != len(participants)):
+            # add timeout
+            (active, _, _) = select(p_sock, [], [])
+            for sock in active:
+                data = sock.recv(1024).split('\n')
+                for votes in data:
+                    if votes == '':
+                        continue
+                    if (votes == 'ack'):
+                        acks += 1
+        if (acks != len(participants)):
+            success = False
+            for i in p_sock:
+                try:
+                    self.send(i, 'abort')
+                except:
+                    continue
+            self.abort()
+        for i in p_sock:
+            try:
+                self.send(i, 'commit')
+            except:
+                continue
         return success
 
     def abort(self):
         self.state = self.IDLE
         self.currCmd = None
         self.currData = None
+        self.others = None
 
     def send(self, sock, s):
         if self.valid:
