@@ -87,9 +87,19 @@ class Client(object):
                     connectSocket.send("info " + str(self.index) + "\n")
                 ans = connectSocket.recv(1024).split('\n')[0]
 
-                return int(ans)
+                lead = ans.split()[0]
+                lib  = ans.split()[1:]
+                if recover:
+                    for key, value in [pair.split(',') for pair in lib]:
+                        self.library[key] = value
+
+                return int(lead)
             except:
                 continue
+
+        # We've experienced a total failure.
+        if recover:
+            pass
 
         return self.index
 
@@ -134,8 +144,8 @@ class Client(object):
             if len(s) < 2:
                 continue
             if s[0] == 'info':
-                # new process is asking for information, send leaderpid
-                self.send(sock, self.leader)
+                # new process is asking for information, send leaderpid and song list
+                self.send(sock, self.leader + ' ' + ' '.join([key + "," + value for key,value in self.library.items()]))
 
     # Handles communication between normal servers and the coordinator.
     def handle_coord_comm(self, sock, data):
