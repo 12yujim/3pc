@@ -21,6 +21,8 @@ class Client(object):
     PRECOMMIT = 2
     ACKNOWLEDGE = 3
 
+    TIMEOUT = 1.0
+
     PORT_BASE = 20000 # port_base
 
     def __init__(self, index, address, port):
@@ -116,7 +118,7 @@ class Client(object):
                 if self.state == self.IDLE:
                     (active, _, _) = select(self.comm_channels, [], [])
                 else:
-                    (active, _, _) = select(self.comm_channels, [], [], 500)
+                    (active, _, _) = select(self.comm_channels, [], [], self.TIMEOUT)
 
                 for sock in active:
                     # We are receving a new connection, so accept it.
@@ -125,19 +127,20 @@ class Client(object):
                         self.comm_channels.append(newsock)
                     else:
                         # Are we communicating with master, coord, or other servers?
-                        line = sock.recv(1024).split('\n')
-                        for data in line:
+                        line = sock.recv(1024)
+                        if not line:
+                            self.comm_channels.remove(sock)
+                        for data in line.split('\n'):
+                            # self.send(self.master, 'check ' + data)
                             if data == '':
                                 continue
-                            if (data == ''):
-                                self.comm_channels.remove(sock)
                             if (sock == self.master):
                                 #self.send(self.master, str(self.index) + ' received from master')
                                 self.handle_master_comm(sock, data)
                             else:
                                 #self.send(self.master, str(self.index) + ' received from server')
                                 self.handle_server_comm(sock, data)
-            except timeout:
+            except socket.timeout:
                 self.leader = self.leader + 1 % n
                 if self.index == self.leader:
                     # you are new coordinator
@@ -176,6 +179,9 @@ class Client(object):
                         logfile.write(vote + '\n')
                     # send vote
                     self.send(sock, self.vote)
+                    if self.crashAfterVote:
+                        self.close()
+                        return
                     self.vote = True
                     self.state = self.PRECOMMIT
                 elif s[0] == 'precommit':
@@ -184,6 +190,9 @@ class Client(object):
                         logfile.write('precommit\n')
                         logfile.write('ack\n')
                     self.send(sock, 'ack')
+                    if self.crashAfterAck:
+                        self.close()
+                        return
                     self.state = self.ACKNOWLEDGE
                 elif s[0] == 'commit':
                     # write to log
@@ -209,8 +218,6 @@ class Client(object):
         line = data.split('\n')
         for l in line:
             s = l.split()
-            if len(s) < 2:
-                continue
             if s[0] == 'add':
                 if self.leader == self.index:
                     # begin vote process
@@ -245,6 +252,7 @@ class Client(object):
             elif s[0] == 'crash':
                 #invoke crash
                 self.close()
+                return
             elif s[0] == 'vote':
                 if s[1] == 'NO':
                     self.vote = False
@@ -262,7 +270,7 @@ class Client(object):
                 pass
             elif s[0] == 'status':
                 # delete this command
-                self.send(self.master, str(self.index) + ' alive')
+                self.send(self.master, str(self.index) + ' ' + str(self.crashAfterVote))
 
 
     def voteReq(self, cmd, data):
@@ -318,25 +326,36 @@ class Client(object):
         ##########
         # VOTING #
         ##########
+        if self.crashAfterVote:
+            self.close()
+            return
         acks = 0
         while (acks != len(p_sock)):
-            # add timeout
-            # wait for participants to send votes
-            (active, _, _) = select(p_sock, [], [])
-            for sock in active:
-                data = sock.recv(1024).split('\n')
-                for votes in data:
-                    if votes == '':
-                        continue
-                    if (votes == 'False'):
-                        # participant voted false
-                        success = False
-                    # received a response
-                    acks += 1
-            if not success:
-                # decide abort
-                with open(self.log, 'a') as logfile:
-                    logfile.write('abort\n')
+            try:
+                # wait for participants to send votes
+                (active, _, _) = select(p_sock, [], [], self.TIMEOUT)
+                for sock in active:
+                    data = sock.recv(1024)
+                    if not data:
+                        # closed socket, participant failure
+                        sock.close()
+                        raise
+                    for votes in data.split('\n'):
+                        if votes == '':
+                            continue
+                        if (votes == 'False'):
+                            # participant voted false
+                            success = False
+                        # received a response
+                        acks += 1
+                if not success:
+                    # decide abort
+                    with open(self.log, 'a') as logfile:
+                        logfile.write('abort\n')
+                    break
+            except:
+                # participant failure
+                success = False
                 break
         if not success:
             # send abort to all participants
@@ -369,19 +388,29 @@ class Client(object):
         #############
         with open(self.log, 'a') as logfile:
             logfile.write('ack\n')
+        if self.crashAfterAck:
+            self.close()
+            return
         acks = 0
         while (acks != len(p_sock)):
-            # add timeout
-            # wait for acks in precommit stage
-            (active, _, _) = select(p_sock, [], [])
-            for sock in active:
-                data = sock.recv(1024).split('\n')
-                for votes in data:
-                    if votes == '':
-                        continue
-                    if (votes == 'ack'):
-                        # received ack
-                        acks += 1
+            try:
+                # wait for acks in precommit stage
+                (active, _, _) = select(p_sock, [], [], self.TIMEOUT)
+                for sock in active:
+                    data = sock.recv(1024)
+                    if not data:
+                        # socket closed, participant failure
+                        sock.close()
+                        raise
+                    for votes in data.split('\n'):
+                        if votes == '':
+                            continue
+                        if (votes == 'ack'):
+                            # received ack
+                            acks += 1
+            except:
+                # participant failure
+                break
         if (acks != len(p_sock)):
             with open(self.log, 'a') as logfile:
                 logfile.write('abort\n')
@@ -417,7 +446,6 @@ class Client(object):
             sock.send(str(s) + '\n')
 
     def close(self):
-        self.log.close()
         try:
             self.valid = False
             for s in sock.comm_channels:
