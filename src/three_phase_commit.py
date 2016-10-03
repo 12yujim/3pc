@@ -64,6 +64,9 @@ class Client(object):
         self.vote = True
         self.crashAfterVote = False
         self.crashAfterAck = False
+        self.crashVoteREQ = (False, [])
+        self.crashPartialPreCommit = (False, [])
+        self.crashPartialCommit = (False, [])
 
     def initialize_socket(self, sock, port):
         global address
@@ -121,10 +124,10 @@ class Client(object):
                             if (data == ''):
                                 self.comm_channels.remove(sock)
                             if (sock == self.master):
-                                #self.send(self.master, str(self.index) + ' received from master')
+                                self.send(self.master, str(self.index) + ' received from master')
                                 self.handle_master_comm(sock, data)
                             else:
-                                #self.send(self.master, str(self.index) + ' received from server')
+                                self.send(self.master, str(self.index) + ' received from server')
                                 self.handle_server_comm(sock, data)
             except:
                 #self.send(self.master, 'exception???')
@@ -175,14 +178,13 @@ class Client(object):
     # Handles communication between servers (coord or normal) and master
     def handle_master_comm(self, sock, data):
         line = data.split('\n')
+        self.send(self.master, "Received master comm " + data)
         for l in line:
             s = l.split()
-            if len(s) < 2:
-                continue
             if s[0] == 'status':
                 # delete this command
                 self.send(self.master, str(self.index) + ' alive')
-            if s[0] == 'add':
+            elif s[0] == 'add':
                 if self.leader == self.index:
                     # begin vote process
                     if self.voteReq(s[0], ','.join(s[1:])):
@@ -226,11 +228,13 @@ class Client(object):
             elif s[0] == 'crashAfterAck':
                 self.crashAfterAck = True
             elif s[0] == 'crashVoteREQ':
-                pass
-            elif s[0] == 'crashPretialPreCommit':
-                pass
-            elif s[0] == 'crashPretialCommit':
-                pass
+                self.send(self.master, "Received crashVoteREQ")
+                self.crashVoteREQ = (True, [int(i) for i in s[1:]])
+                self.send(self.master, "Received crashVoteREQ " + str(self.crashVoteREQ[1][0]))
+            elif s[0] == 'crashPartialPreCommit':
+                self.crashPartialPreCommit = (True, [int(i) for i in s[1:]])
+            elif s[0] == 'crashPartialCommit':
+                self.crashPartialCommit = (True, [int(i) for i in s[1:]])
 
 
     def voteReq(self, cmd, data):
@@ -256,11 +260,22 @@ class Client(object):
                 continue
         request += ''.join(participants)
         # sent out all requests, inform participants of all other participants
-        for i in p_sock:
+        self.send(self.master, "Sending requests")
+        for i,s in zip(participants, p_sock):
             try:
-                self.send(i, request)
+                self.send(self.master, "Trying to send request to " + i + str(self.crashVoteREQ[1]))
+                if not self.crashVoteREQ[0]:
+                    self.send(s, request)
+                    continue
+
+                if self.crashVoteREQ[0] and (int(i) in self.crashVoteREQ[1]):
+                    self.send(self.master, "Sent request to " + i)
+                    self.send(s, request)
             except:
                 continue
+        if self.crashVoteREQ[0]:
+            self.send(self.master, "Coordinator " + str(self.index) + " crashing!")
+            sys.exit(0)
         acks = 0
         while (acks != len(participants)):
             # add timeout
