@@ -183,8 +183,7 @@ class Client(object):
                     # send vote
                     self.send(sock, self.vote)
                     if self.crashAfterVote:
-                        self.close()
-                        return
+                        sys.exit(0)
                     self.vote = True
                     self.state = self.PRECOMMIT
                 elif s[0] == 'precommit':
@@ -194,8 +193,7 @@ class Client(object):
                         logfile.write('ack\n')
                     self.send(sock, 'ack')
                     if self.crashAfterAck:
-                        self.close()
-                        return
+                        sys.exit(0)
                     self.state = self.ACKNOWLEDGE
                 elif s[0] == 'commit':
                     # write to log
@@ -255,8 +253,7 @@ class Client(object):
                     self.send(self.master, 'resp NONE')
             elif s[0] == 'crash':
                 #invoke crash
-                self.close()
-                return
+                sys.exit(0)
             elif s[0] == 'vote':
                 if s[1] == 'NO':
                     self.vote = False
@@ -340,7 +337,7 @@ class Client(object):
         # VOTING #
         ##########
         if self.crashAfterVote:
-            self.close()
+            sys.exit(0)
             return
         acks = 0
         while (acks != len(p_sock)):
@@ -402,7 +399,7 @@ class Client(object):
         with open(self.log, 'a') as logfile:
             logfile.write('ack\n')
         if self.crashAfterAck:
-            self.close()
+            sys.exit(0)
             return
         acks = 0
         while (acks != len(p_sock)):
