@@ -176,6 +176,7 @@ class Client(object):
                         logfile.write(vote + '\n')
                     # send vote
                     self.send(sock, self.vote)
+                    self.vote = True
                     self.state = self.PRECOMMIT
                 elif s[0] == 'precommit':
                     # write to log
