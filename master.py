@@ -53,7 +53,7 @@ class ClientHandler(Thread):
                         wait_ack = False
                         wait_ack_lock.release()
                     else:
-                        print s[0]
+                        print s
             except:
                 print sys.exc_info()
                 self.valid = False
@@ -144,6 +144,8 @@ def main():
             wait_ack_lock.acquire()
             wait_ack = True
             wait_ack_lock.release()
+        elif cmd == 'status':
+            send(pid, sp1[1])
         elif cmd == 'crash':
             send(pid, sp1[1])
             if pid == -1:
