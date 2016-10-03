@@ -28,6 +28,7 @@ class Client(object):
     def __init__(self, index, address, port):
         self.index = index
         self.library = {}
+        self.send_info = []
         self.valid = True
         self.state = self.IDLE
         self.currCmd = None
@@ -40,6 +41,7 @@ class Client(object):
         self.master.setsockopt(SOL_SOCKET, SO_REUSEADDR, 1)
 
         # Read from the data log and see if this is the first time.
+        recover = True
         self.log = "log" + str(self.index) + ".txt"
         store = ''
         try:
@@ -47,20 +49,15 @@ class Client(object):
                 store = logfile.readline().split()
         except:
             with open(self.log, 'w') as logfile:
-                pass
+                recover = False
         for [key,value] in [pair.split(',') for pair in store]:
-            self.library[key] = value
-
-        # If there was no store we are starting the servers.
-        # Otherwise we're recovering from a crash and need to request state.
-        recover = False
-        if self.library:
-            recover = True
+            self.library[key] = value 
+            
+        # Connect with master after determining coordinator.
+        (self.master, _) = self.initialize_socket(self.master, port)
         
         self.leader = self.determineLeader(recover) # initialize leader, start check at 0
 
-        # Connect with master after determining coordinator.
-        (self.master, _) = self.initialize_socket(self.master, port)
         if self.leader == self.index:
             # notify master you are coordinator
             self.send(self.master, "coordinator " + str(self.leader))
@@ -87,31 +84,85 @@ class Client(object):
     # Also may be recovering after total failure, so handle that here also *todo*
     def determineLeader(self, recover):
         global n, address
+
+        valid_contacts = []
         for i in xrange(n):
             try:
                 if i == self.index:
                     continue
                 connectSocket = socket(AF_INET, SOCK_STREAM)
                 connectSocket.connect((address, self.PORT_BASE + i))
-                if self.valid:
-                    self.send(connectSocket, "info " + str(self.index))
-                ans = connectSocket.recv(1024).split('\n')[0]
 
-                lead = ans.split()[0]
-                if recover:
-                    lib  = ans.split()[1:]
-                    for key, value in [pair.split(',') for pair in lib]:
-                        self.library[key] = value
-
-                return int(lead)
+                valid_contacts.append((i, connectSocket))
             except:
                 continue
 
-        # We've experienced a total failure.
-        if recover:
-            pass
+        lead = -1
+        intersection = []
+        running = []
+        for i,sock in valid_contacts:
+            try:
+                self.send(sock, 'info ' + str(self.index))
 
-        return self.index
+                # The contact may be in a transaction, or possibly died after a transaction.
+                # Either way we move on until all have timed out. This is then a total failure.
+                (active, _, _) = select([sock], [], [], self.TIMEOUT)
+
+                if (active == []):
+                    continue
+
+                ans = sock.recv(1024).split('\n')[0].split()
+                lead = int(ans[0])
+
+                if not recover:
+                    return lead
+
+                # If we receive -1 for leader, then we are in a total failure state
+                if lead == -1:
+                    pass
+
+                lib  = ans[1:]
+                for key, value in [pair.split(',') for pair in lib]:
+                    self.library[key] = value
+
+                return lead
+            except:
+                continue
+
+
+        if not recover:
+            return self.index
+
+        # We've experienced a total failure. See if can decide what to do, if not wait for last process.
+        tf_listen = socket(AF_INET, SOCK_STREAM)
+        tf_listen.bind((address, self.PORT_BASE + self.index))
+        tf_listen.listen(n)
+        
+        while True:
+            try:
+                (active, _, _) = select([tf_listen], [], [])
+
+                ans = tf_listen.recv(1024).split('\n')[0].split()
+                proc_id = ans[1]
+                proc_part = ans[2]
+
+                # Once a process wakes up, check to see if it's in our participant group.
+                # Send it the running group and current intersection if it is.
+                # Once the last process wakes up it will run the termination protocol.
+                # See if the responder is in our participant list.
+                with open(self.log, 'r') as logfile:
+                    self.others = logfile.read().split('\n')[2].split(',')
+
+                # Send them the current recovered processes and the instersection of UP
+                if i in self.others:
+                    running.append(proc_id)
+                    intersection = [p for p in intersection if p in proc_part]
+
+                    self.send(tf_listen, str(lead) + ' ' + ','.join(running) + ' ' + ','.join(inter))
+            except:
+                break
+
+        
 
     def run(self):
         global address
@@ -119,6 +170,10 @@ class Client(object):
             try:
                 # listen for input from all channels
                 if self.state == self.IDLE:
+                    # Send info after transaction if we missed someone.
+                    for sock in self.send_info:
+                        self.send(sock, str(self.leader) + ' ' + ' '.join([key + "," + value for key,value in self.library.items()]))
+
                     (active, _, _) = select(self.comm_channels, [], [])
                 else:
                     (active, _, _) = select(self.comm_channels, [], [], self.TIMEOUT)
@@ -162,9 +217,12 @@ class Client(object):
             for l in line:
                 s = l.split()
                 if s[0] == 'info':
-                    # new process is asking for information, send leaderpid
-
-                    self.send(sock, str(self.leader) + ' ' + ' '.join([key + "," + value for key,value in self.library.items()]))
+                    # new process is asking for information, send leaderpid, list of songs, and participants
+                    if (self.state == self.IDLE):
+                        self.send(sock, str(self.leader) + ' ' + ' '.join([key + "," + value for key,value in self.library.items()]))
+                        self.send(self.master, str(self.leader) + ' ' + ' '.join([key + "," + value for key,value in self.library.items()]))
+                    else:
+                        self.send_info = self.send_info.append(sock)
                 if s[0] == 'voteREQ':
                     self.state = self.FIRSTVOTE
                     self.currCmd = s[1]
@@ -256,7 +314,7 @@ class Client(object):
             elif s[0] == 'crash':
                 #invoke crash
                 self.close()
-                return
+                sys.exit(0)
             elif s[0] == 'vote':
                 if s[1] == 'NO':
                     self.vote = False

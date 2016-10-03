@@ -2,4 +2,4 @@
 
 ps aux | grep python | awk '{print $2}' | xargs kill
 
-find ./log*.txt -type f -delete
+find log*.txt -type f -delete
