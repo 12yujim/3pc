@@ -83,6 +83,7 @@ def send(index, data):
         wait = wait_ack
         wait_ack_lock.release()
     pid = int(index)
+    print "Sending " + str(index)
     if pid >= 0 and pid in threads:
         threads[pid].send(data)
         return
@@ -92,6 +93,7 @@ def send(index, data):
         leader_lock.acquire()
         pid = leader
         leader_lock.release()
+    print "Coord"
     threads[pid].send(data)
 
 def exit():
@@ -137,7 +139,9 @@ def main():
             threads[pid] = handler
             handler.start()
         elif cmd == 'add' or cmd == 'delete' or cmd == 'get':
+            print "hello"
             send(pid, sp1[1])
+            print "goodbye"
             for c in crash_later:
                 live_list[c] = False
             crash_later = []
