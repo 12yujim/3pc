@@ -23,7 +23,6 @@ class Client(object):
     PORT_BASE = 20000 # port_base
 
     def __init__(self, index, address, port):
-        global PORT_BASE
         self.index = index
         self.library = {}
         self.valid = True
@@ -109,14 +108,13 @@ class Client(object):
                         for data in line:
                             if data == '':
                                 continue
-                            self.send(self.master, str(self.index) + ' ' + data)
                             if (data == ''):
                                 self.comm_channels.remove(sock)
                             if (sock == self.master):
-                                self.send(self.master, str(self.index) + ' received from master')
+                                #self.send(self.master, str(self.index) + ' received from master')
                                 self.handle_master_comm(sock, data)
                             else:
-                                self.send(self.master, str(self.index) + ' received from server')
+                                #self.send(self.master, str(self.index) + ' received from server')
                                 self.handle_server_comm(sock, data)
             except:
                 #self.send(self.master, 'exception???')
@@ -134,13 +132,12 @@ class Client(object):
                     # new process is asking for information, send leaderpid
                     self.send(sock, self.leader)
                 if s[0] == 'voteREQ':
-                    self.send(self.master, 'data ' + s[2])
+                    #self.send(self.master, 'data ' + s[2])
                     self.state = self.FIRSTVOTE
                     self.currCmd = s[1]
                     self.currData = s[2]
                     # write to DT log
                     self.others = list(s[3])
-                    self.send(self.master, 'we made it')
                     # write participants to DT log
                     # write vote to DT log
                     # send vote
@@ -173,6 +170,7 @@ class Client(object):
             if len(s) < 2:
                 continue
             if s[0] == 'status':
+                # delete this command
                 self.send(self.master, str(self.index) + ' alive')
             if s[0] == 'add':
                 if self.leader == self.index:
@@ -262,7 +260,6 @@ class Client(object):
                 for votes in data:
                     if votes == '':
                         continue
-                    self.send(self.master, 'got 1')
                     if (votes == 'False'):
                         success = False
                     acks += 1
