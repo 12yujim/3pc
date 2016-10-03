@@ -2,3 +2,4 @@ example_scripts/*
 sample_submission/*
 lab1.pdf
 grading.py
+*.txt

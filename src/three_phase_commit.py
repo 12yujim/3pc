@@ -66,8 +66,6 @@ class Client(object):
         self.crashAfterVote = False
         self.crashAfterAck = False
 
-        self.dtLog = 'dt' + str(self.index)
-
     def initialize_socket(self, sock, port):
         global address
         sock.bind((address, port))
