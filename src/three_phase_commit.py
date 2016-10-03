@@ -7,7 +7,7 @@ import sys, os
 import subprocess
 import time
 from threading import Thread, Lock
-from socket import SOCK_STREAM, socket, AF_INET
+from socket import SOCK_STREAM, socket, AF_INET, SOL_SOCKET, SO_REUSEADDR
 from select import select
 
 address = "localhost"
@@ -16,15 +16,29 @@ PORT_BASE = 20000 # port_base
 
 class Client(object):
     def __init__(self, index, address, port):
+        global PORT_BASE
         self.index = index
         self.library = {}
         self.valid = True
 
         self.master = socket(AF_INET, SOCK_STREAM)
         self.my_sock = socket(AF_INET, SOCK_STREAM)
-        #self.my_sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+        self.my_sock.setsockopt(SOL_SOCKET, SO_REUSEADDR, 1)
+        self.master.setsockopt(SOL_SOCKET, SO_REUSEADDR, 1)
+
+        # Read from the data log and see if this is the first time.
+        self.log = open("log" + str(self.index) + ".txt", 'w+')
+        store = self.log.readline().split()
+        for [key,value] in [pair.split(',') for pair in store]:
+            self.library['key'] = value
+
+        # If there was no store we are starting the servers.
+        # Otherwise we're recovering from a crash and need to request state.
+        recover = False
+        if self.library:
+            recover = True
         
-        self.leader = self.determineLeader() # initialize leader, start check at 0
+        self.leader = self.determineLeader(recover) # initialize leader, start check at 0
 
         # Connect with master after determining coordinator.
         (self.master, _) = self.initialize_socket(self.master, port)
@@ -35,7 +49,7 @@ class Client(object):
         # Listen for other processes on my designated port.
         self.send(self.master, "Hello there")
         self.send(self.master, address + " there")
-        self.my_sock.bind((address, 20000 + self.index))
+        self.my_sock.bind((address, PORT_BASE + self.index))
         self.send(self.master, "Making there")
         self.my_sock.listen(n)
         self.comm_channels = [self.my_sock, self.master]
@@ -51,7 +65,7 @@ class Client(object):
 
     # Determine the current leader on startup. May need to retrieve state if recovering.
     # Also may be recovering after total failure, so handle that here also *todo*
-    def determineLeader(self):
+    def determineLeader(self, recover):
         global address, PORT_BASE
         for i in xrange(n):
             try:
@@ -74,6 +88,7 @@ class Client(object):
         while self.valid:
             try:
                 # listen for input from all channels
+
                 (active, _, _) = select(self.comm_channels, [], [])
 
                 for sock in active:
@@ -84,17 +99,19 @@ class Client(object):
                     else:
                         # Are we communicating with master, coord, or other servers?
                         data = sock.recv(1024)
+
                         if (data == ''):
                             sock.close()
                             self.comm_channels.remove(sock)
-                        if (sock == self.master):
+                        elif (sock == self.master):
                             self.handle_master_comm(sock, data)
-                        elif (sock.getpeername()[1] == self.leader):
+                        elif (sock.getsockname()[1] == self.leader):
                             self.handle_coord_comm(sock, data)
                         else:
                             self.handle_server_comm(sock, data)
             except:
-                #self.sock.close()
+                for sock in active:
+                    sock.close()
                 break
 
     # Handles communication between normal servers.
