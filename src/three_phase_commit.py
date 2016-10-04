@@ -33,7 +33,7 @@ class Client(object):
         self.state = self.IDLE
         self.currCmd = None
         self.currData = None
-        self.others = None
+        self.others = []
         self.upset  = [str(self.index)]
 
         self.master = socket(AF_INET, SOCK_STREAM)
@@ -54,7 +54,7 @@ class Client(object):
         for [key,value] in [pair.split(',') for pair in store]:
             self.library[key] = value 
             
-        # Connect with master after determining coordinator.
+        # Connect with master before determining coordinator.
         (self.master, _) = self.initialize_socket(self.master, port)
         
         self.leader = self.determineLeader(recover) # initialize leader, start check at 0
@@ -117,7 +117,8 @@ class Client(object):
 
 
                 if not recover:
-                    self.upset = ans[1].split(',').append(self.index)
+                    self.upset = ans[1].split(',')
+                    self.upset.append(str(self.index))
 
                     return lead
 
@@ -129,7 +130,16 @@ class Client(object):
                     # If intersection of UPs is subset of Running then run termination protocol.
                     if all([p in running for p in intersection]):
                         # Run termination, elect new leader.
-                        pass
+                        try:
+                            with open(self.log, 'r') as logfile:
+                                self.others = logfile.read().split('\n')[2].split(',')
+                        except:
+                            with open('leaderDT.txt', 'r') as logfile:
+                                self.others = logfile.read().split('\n')[2].split(',')
+
+                        self.determine_state()
+
+                        self.termination()
                     else:
                         # Wait for latest process to wake up.
                         break
@@ -188,7 +198,86 @@ class Client(object):
             except:
                 break
 
+    def determine_state(self):
+        try:
+            with open(self.log, 'r') as logfile:
+                line = logfile.readline()
+                line = logfile.readline()
+                while (line != ''):
+                    if (line.split()[0] == 'START_3PC'):
+                        self.state = FIRSTVOTE
+                        line = logfile.readline()
+                    if (line == 'yes'):
+                        self.state = PRECOMMIT
+                        line = logfile.readline()
+                    if (line == 'ack'):
+                        self.state = ACKNOWLEDGE
+                    line = logfile.readline()
+        except:
+            with open('leaderDT.txt', 'r') as logfile:
+                line = logfile.readline()
+                line = logfile.readline()
+                while (line != ''):
+                    if (line.split()[0] == 'START_3PC'):
+                        self.state = FIRSTVOTE
+                        line = logfile.readline()
+                    if (line == 'yes'):
+                        self.state = PRECOMMIT
+                        line = logfile.readline()
+                    if (line == 'ack'):
+                        self.state = ACKNOWLEDGE
+                    line = logfile.readline()
+
         
+        
+
+    def termination(self, sock=None):
+        global n
+        self.leader = (self.leader + 1) % n
+        aborted = False
+        if self.leader == self.index:
+            # you are now the leader
+            if self.IDLE < self.state < self.ACKNOWLEDGE:
+                # in middle of protocol and have not yet acknowledged, abort
+                for i in self.others:
+                    try:
+                        connectSocket = socket(AF_INET, SOCK_STREAM)
+                        connectSocket.connect((address, self.PORT_BASE + i))
+                        self.send(connectSocket, 'abort')
+                    except:
+                        continue
+                aborted = True
+            else:
+                # have acknowledged, check if commit
+                with open('leaderDT.txt', 'r') as logfile:
+                    lastAct = logfile.readlines()[-1]
+                    if lastAct.strip() == 'commit':
+                        # have committed
+                        for i in self.others:
+                            try:
+                                connectSocket = socket(AF_INET, SOCK_STREAM)
+                                connectSocket.connect((address, self.PORT_BASE + i))
+                                self.send(connectSocket, 'commit')
+                            except:
+                                continue
+                    else:
+                        for i in self.others:
+                            try:
+                                connectSocket = socket(AF_INET, SOCK_STREAM)
+                                connectSocket.connect((address, self.PORT_BASE + i))
+                                self.send(connectSocket, 'abort')
+                            except:
+                                continue
+                        aborted = True
+            if aborted:
+                self.abort()
+                self.send(self.master, 'resp abort')
+            else:
+                self.send(self.master, 'resp commit')
+            if sock:
+                self.comm_channels.remove(sock)
+            self.send(self.master, 'coordinator ' + str(self.leader))
+
 
     def run(self):
         global address
@@ -215,7 +304,7 @@ class Client(object):
                         if not line:
                             self.comm_channels.remove(sock)
                         for data in line.split('\n'):
-                            # self.send(self.master, 'check ' + data)
+                            #self.send(self.master, str(self.index) + ' ' + data)
                             if data == '':
                                 continue
                             if (sock == self.master):
@@ -224,80 +313,24 @@ class Client(object):
                             else:
                                 #self.send(self.master, str(self.index) + ' received from server')
                                 self.handle_server_comm(sock, data)
-            except socket.timeout:
-                self.leader = self.leader + 1 % n
-                if self.index == self.leader:
-                    # you are new coordinator
-                    self.send(self.master, 'coordinator ' + str(self.index))
-                # abort current protocol
-                self.abort()
-            except:
-                #self.send(self.master, 'exception???')
+            except Exception, e:
+                #self.send(self.master, str(e))
                 self.close()
                 break
 
     # Handles communication between normal servers.
     def handle_server_comm(self, sock, data):
         line = data.split('\n')
-        try:
-            for l in line:
-                s = l.split()
-                if s[0] == 'info':
-                    # new process is asking for information, send leaderpid, list of songs, and participants
-                    self.upset.append(s[1])
-                    if (self.state == self.IDLE):
-                        self.send(sock, str(self.leader) + ' ' + ','.join(self.upset) + ' ' + ' '.join([key + "," + value for key,value in self.library.items()]))
-                        self.send(self.master, str(self.leader) + ' ' + ' '.join([key + "," + value for key,value in self.library.items()]))
-                    else:
-                        self.send_info = self.send_info.append(sock)
-                if s[0] == 'voteREQ':
-                    self.state = self.FIRSTVOTE
-                    self.currCmd = s[1]
-                    self.currData = s[2]
-                    self.others = list(s[3])
-                    # write to DT log
-                    with open(self.log, 'w') as logfile:
-                        for songName in self.library:
-                            logfile.write('%s,%s ' % (songName, self.library[songName]))
-                        logfile.write('\n')
-                        logfile.write('START_3PC %s,%s' % (self.currCmd, self.currData))
-                        logfile.write('\n')
-                        logfile.write(','.join(self.others) + '\n')
-                        vote = 'yes' if self.vote else 'no'
-                        logfile.write(vote + '\n')
-                    # send vote
-                    self.send(sock, self.vote)
-                    if self.crashAfterVote:
-                        sys.exit(0)
-                    self.vote = True
-                    self.state = self.PRECOMMIT
-                elif s[0] == 'precommit':
-                    # write to log
-                    with open(self.log, 'a') as logfile:
-                        logfile.write('precommit\n')
-                        logfile.write('ack\n')
-                    self.send(sock, 'ack')
-                    if self.crashAfterAck:
-                        sys.exit(0)
-                    self.state = self.ACKNOWLEDGE
-                elif s[0] == 'commit':
-                    # write to log
-                    with open(self.log, 'a') as logfile:
-                        logfile.write('commit\n')
-                    songName = self.currData.split(',')[0]
-                    if self.currCmd == 'delete':
-                        if songName in self.library:
-                            del self.library[songName]
-                    if self.currCmd == 'add':
-                        url = self.currData.split(',')[1]
-                        self.library[songName] = url
-                elif s[0] == 'abort':
-                    with open(self.log, 'a') as logfile:
-                        logfile.write('abort\n')
-                    self.abort()
-        except:
-            #self.send(self.master, 'failure complete')
-            pass
+        for l in line:
+            s = l.split()
+            if s[0] == 'info':
+                # new process is asking for information, send leaderpid
+                try:
+                    self.send(sock, str(self.leader) + ' ' + ','.join(self.upset) + ' ' + ' '.join([key + "," + value for key,value in self.library.items()]))
+                except:
+                    continue
+            if s[0] == 'voteREQ':
+                self.participantVoteREQ(sock, s)
 
     # Handles communication between servers (coord or normal) and master
     def handle_master_comm(self, sock, data):
@@ -366,6 +399,7 @@ class Client(object):
         self.currData = data
         # return True if all processes vote commit, else return False
         success = True
+        self.log = 'leaderDT.txt'
         with open(self.log, 'w') as logfile:
             for songName in self.library:
                 logfile.write('%s,%s ' % (songName, self.library[songName]))
@@ -400,17 +434,14 @@ class Client(object):
                 continue
         # inform participants of all participants
         request += ''.join(participants)
+        participants.remove(str(self.index))
         with open(self.log, 'a') as logfile:
             logfile.write(','.join(participants) + '\n')
-            vote = 'yes' if self.vote else 'no'
-            logfile.write(vote + '\n')
         # sent out all requests, inform participants of all other participants
-        participants.remove(str(self.index))
-        self.send(self.master, "Participant are " + str(participants))
+        #participants.remove(str(self.index))
         for i,s in zip(participants, p_sock):
             try:
                 if not self.crashVoteREQ[0]:
-                    self.send(self.master, "Sending out parti")
                     self.send(s, request)
                     continue
 
@@ -418,6 +449,9 @@ class Client(object):
                     self.send(s, request)
             except:
                 continue
+        with open(self.log, 'a') as logfile:
+            vote = 'yes' if self.vote else 'no'
+            logfile.write(vote + '\n')
         if self.crashVoteREQ[0]:
             sys.exit(0)
 
@@ -426,7 +460,6 @@ class Client(object):
         ##########
         if self.crashAfterVote:
             sys.exit(0)
-            return
         acks = 0
         while (acks != len(p_sock)):
             try:
@@ -544,6 +577,113 @@ class Client(object):
         if self.crashPartialCommit[0]:
             sys.exit(0)
         return success
+
+    def participantVoteREQ(self, sock, s):
+        self.state = self.FIRSTVOTE
+        self.currCmd = s[1]
+        self.currData = s[2]
+        self.others = list(s[3])
+        self.others.remove(str(self.index))
+        # write to DT log
+        with open(self.log, 'w') as logfile:
+            for songName in self.library:
+                logfile.write('%s,%s ' % (songName, self.library[songName]))
+            logfile.write('\n')
+            logfile.write('START_3PC %s,%s' % (self.currCmd, self.currData))
+            logfile.write('\n')
+            logfile.write(','.join(self.others) + '\n')
+            vote = 'yes' if self.vote else 'no'
+            logfile.write(vote + '\n')
+        # send vote
+        coordinatorFailure = False
+        self.state = self.PRECOMMIT
+        try:
+            self.send(sock, self.vote)
+        except:
+            coordinatorFailure = True
+        if self.crashAfterVote:
+            sys.exit(0)
+        if coordinatorFailure:
+            self.termination(sock)
+            return
+        self.vote = True
+
+        sock.settimeout(self.TIMEOUT)
+
+        #############
+        # PRECOMMIT #
+        #############
+        try:
+            data = sock.recv(1024)
+            if not data:
+                # closed socket, coordinator failure
+                sock.close()
+                raise
+            for line in data.split('\n'):
+                if line == '':
+                    continue
+                elif (line == 'abort'):
+                    # protocol aborted
+                    with open(self.log, 'a') as logfile:
+                        logfile.write('abort\n')
+                    self.abort()
+                    return
+                elif (line == 'precommit'):
+                    break
+        except:
+            self.termination(sock)
+            return
+        # write to log
+        with open(self.log, 'a') as logfile:
+            logfile.write('precommit\n')
+            logfile.write('ack\n')
+        coordinatorFailure = False
+        try:
+            self.send(sock, 'ack')
+        except:
+            coordinatorFailure = True
+        if self.crashAfterAck:
+            sys.exit(0)
+        if coordinatorFailure:
+            self.termination(sock)
+            return
+        
+
+        ##########
+        # COMMIT #
+        ##########
+        try:
+            data = sock.recv(1024)
+            if not data:
+                # closed socket, coordinator failure
+                sock.close()
+                raise
+            for line in data.split('\n'):
+                if line == '':
+                    continue
+                if (line == 'abort'):
+                    # protocol aborted
+                    with open(self.log, 'a') as logfile:
+                        logfile.write('abort\n')
+                    self.abort()
+                    return
+                elif (line == 'commit'):
+                    break
+        except:
+            self.termination(sock)
+            return
+        # write to log
+        with open(self.log, 'a') as logfile:
+            logfile.write('commit\n')
+        songName = self.currData.split(',')[0]
+        if self.currCmd == 'delete':
+            if songName in self.library:
+                del self.library[songName]
+        if self.currCmd == 'add':
+            url = self.currData.split(',')[1]
+            self.library[songName] = url
+        # protocol complete, use abort to clear
+        self.abort()
 
     def abort(self):
         self.state = self.IDLE
