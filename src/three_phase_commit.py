@@ -21,7 +21,8 @@ class Client(object):
     PRECOMMIT = 2
     ACKNOWLEDGE = 3
 
-    TIMEOUT = 1.0
+    TIMEOUT = 2.0
+    COORDINATOR_TIMEOUT = 1.5
 
     PORT_BASE = 20000 # port_base
 
@@ -57,6 +58,7 @@ class Client(object):
         (self.master, _) = self.initialize_socket(self.master, port)
         
         self.leader = self.determineLeader(recover) # initialize leader, start check at 0
+        #self.leader = 0
 
         if self.leader == self.index:
             # notify master you are coordinator
@@ -104,12 +106,12 @@ class Client(object):
 
                 # The contact may be in a transaction, or possibly died after a transaction.
                 # Either way we move on until all have timed out. This is then a total failure.
-                (active, _, _) = select([sock], [], [], self.TIMEOUT)
-
-                if (active == []):
+                self.sock.settimeout(self.TIMEOUT)
+                data = sock.recv(1024)
+                if not data:
                     continue
 
-                ans = sock.recv(1024).split('\n')[0].split()
+                ans = data.split('\n')[0].split()
                 lead = int(ans[0])
 
                 if not recover:
@@ -139,9 +141,10 @@ class Client(object):
         
         while True:
             try:
-                (active, _, _) = select([tf_listen], [], [])
+                tf_listen.settimeout(self.TIMEOUT)
+                data = tf_listen.recv(1024)
 
-                ans = tf_listen.recv(1024).split('\n')[0].split()
+                ans = data.split('\n')[0].split()
                 proc_id = ans[1]
                 proc_part = ans[2]
 
@@ -161,8 +164,7 @@ class Client(object):
             except:
                 break
 
-        
-
+    # elect new coordinator
     def termination(self, sock=None):
         global n
         self.leader = (self.leader + 1) % n
@@ -179,7 +181,7 @@ class Client(object):
                     except:
                         continue
                 aborted = True
-            else:
+            elif self.state == self.ACKNOWLEDGE:
                 # have acknowledged, check if commit
                 with open('leaderDT.txt', 'r') as logfile:
                     lastAct = logfile.readlines()[-1]
@@ -201,13 +203,15 @@ class Client(object):
                             except:
                                 continue
                         aborted = True
-            if aborted:
-                self.abort()
-                self.send(self.master, 'resp abort')
-            else:
-                self.send(self.master, 'resp commit')
+            if self.state != self.IDLE:
+                if aborted:
+                    self.abort()
+                    self.send(self.master, 'resp abort')
+                else:
+                    self.send(self.master, 'resp commit')
             if sock:
                 self.comm_channels.remove(sock)
+            self.send(self.master, str(self.index) + ' ' + str(self.leader))
             self.send(self.master, 'coordinator ' + str(self.leader))
 
 
@@ -221,7 +225,9 @@ class Client(object):
                     for sock in self.send_info:
                         self.send(sock, str(self.leader) + ' ' + ' '.join([key + "," + value for key,value in self.library.items()]))
 
-                    (active, _, _) = select(self.comm_channels, [], [])
+                if self.index == self.leader:
+                    # give coordinator time to send heartbeat
+                    (active, _, _) = select(self.comm_channels, [], [], self.COORDINATOR_TIMEOUT)
                 else:
                     (active, _, _) = select(self.comm_channels, [], [], self.TIMEOUT)
 
@@ -245,10 +251,34 @@ class Client(object):
                             else:
                                 #self.send(self.master, str(self.index) + ' received from server')
                                 self.handle_server_comm(sock, data)
+                self.heartbeat(active)
             except Exception, e:
-                #self.send(self.master, str(e))
+                self.send(self.master, str(self.library))
+                self.send(self.master, str(e))
                 self.close()
                 break
+
+    # send heartbeat to ensure coordinator is alive
+    # if not coordinator, 
+    def heartbeat(self, active):
+        global n, address
+        if (self.index == self.leader):
+            # you are coordinator, send everyone a heartbeat
+            for i in xrange(n):
+                try:
+                    if i == self.index:
+                        continue
+                    connectSocket = socket(AF_INET, SOCK_STREAM)
+                    connectSocket.connect((address, self.PORT_BASE + i))
+                    self.send(connectSocket, 'heartbeat')
+                except:
+                    continue
+        elif active:
+            # do nothing
+            return
+        else:
+            # timed out waiting for heartbeat
+            self.termination()
 
     # Handles communication between normal servers.
     def handle_server_comm(self, sock, data):
@@ -263,6 +293,9 @@ class Client(object):
                     continue
             if s[0] == 'voteREQ':
                 self.participantVoteREQ(sock, s)
+            if s[0] == 'heartbeat':
+                # everything is fine, continue
+                continue
 
     # Handles communication between servers (coord or normal) and master
     def handle_master_comm(self, sock, data):
