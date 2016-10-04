@@ -236,44 +236,45 @@ class Client(object):
         aborted = False
         if self.leader == self.index:
             # you are now the leader
-            if self.IDLE < self.state < self.ACKNOWLEDGE:
-                # in middle of protocol and have not yet acknowledged, abort
-                for i in self.others:
-                    try:
-                        connectSocket = socket(AF_INET, SOCK_STREAM)
-                        connectSocket.connect((address, self.PORT_BASE + i))
-                        self.send(connectSocket, 'abort')
-                    except:
-                        continue
-                aborted = True
-            elif self.state == self.ACKNOWLEDGE:
+            # if self.IDLE < self.state < self.ACKNOWLEDGE:
+            #     # in middle of protocol and have not yet acknowledged, abort
+            #     for i in self.others:
+            #         try:
+            #             connectSocket = socket(AF_INET, SOCK_STREAM)
+            #             connectSocket.connect((address, self.PORT_BASE + i))
+            #             self.send(connectSocket, 'abort')
+            #         except:
+            #             continue
+            #     aborted = True
+            if self.IDLE < self.state == self.ACKNOWLEDGE:
                 # have acknowledged, check if commit
+                lastAct = ''
                 with open('leaderDT.txt', 'r') as logfile:
                     lastAct = logfile.readlines()[-1]
-                    if lastAct.strip() == 'commit':
-                        # have committed
-                        for i in self.others:
-                            try:
-                                connectSocket = socket(AF_INET, SOCK_STREAM)
-                                connectSocket.connect((address, self.PORT_BASE + i))
-                                self.send(connectSocket, 'commit')
-                            except:
-                                continue
-                    else:
-                        for i in self.others:
-                            try:
-                                connectSocket = socket(AF_INET, SOCK_STREAM)
-                                connectSocket.connect((address, self.PORT_BASE + i))
-                                self.send(connectSocket, 'abort')
-                            except:
-                                continue
-                        aborted = True
+                if lastAct.strip() == 'commit':
+                    # have committed
+                    for i in self.others:
+                        try:
+                            connectSocket = socket(AF_INET, SOCK_STREAM)
+                            connectSocket.connect((address, self.PORT_BASE + i))
+                            self.send(connectSocket, 'commit')
+                        except:
+                            continue
+                else:
+                    for i in self.others:
+                        try:
+                            connectSocket = socket(AF_INET, SOCK_STREAM)
+                            connectSocket.connect((address, self.PORT_BASE + i))
+                            self.send(connectSocket, 'abort')
+                        except:
+                            continue
+                    aborted = True
             if self.state != self.IDLE:
                 if aborted:
                     self.abort()
-                    self.send(self.master, 'resp abort')
+                    self.send(self.master, 'ack abort')
                 else:
-                    self.send(self.master, 'resp commit')
+                    self.send(self.master, 'ack commit')
             if sock:
                 self.comm_channels.remove(sock)
             self.send(self.master, str(self.index) + ' ' + str(self.leader))
@@ -371,25 +372,25 @@ class Client(object):
                 if self.leader == self.index:
                     # begin vote process
                     if self.voteReq(s[0], ','.join(s[1:])):
-                       self.send(sock, 'resp commit')
+                       self.send(self.master, 'ack commit')
                        # write to library
                        self.library[s[1]] = s[2]
                     else:
-                       self.send(self.master, 'resp abort')
+                       self.send(self.master, 'ack abort')
                 else:
                     continue
             elif s[0] == 'delete':
                 if self.leader == self.index:
                     # begin vote process
                     if self.voteReq(s[0], s[1]):
-                        self.send(self.master, 'resp commit')
+                        self.send(self.master, 'ack commit')
                         # delete from library
                         if s[1] in self.library:
                             del self.library[s[1]]
                         else:
                             pass
                     else:
-                        self.send(self.master, 'resp abort')
+                        self.send(self.master, 'ack abort')
                 else:
                     continue
             elif s[0] == 'get':
@@ -429,6 +430,8 @@ class Client(object):
         # return True if all processes vote commit, else return False
         success = True
         leaderLog = 'leaderDT.txt'
+        with open(leaderLog, 'w') as cleanfile:
+            pass
         writedata = ''
         for songName in self.library:
             writedata += '%s,%s ' % (songName, self.library[songName])
@@ -709,8 +712,8 @@ class Client(object):
         # protocol complete, use abort to clear
         self.abort()
 
-    def logwrite(self, logfile, data):
-        with open('logfile', 'a') as logfile:
+    def logwrite(self, log, data):
+        with open(log, 'a') as logfile:
             logfile.write(data)
 
     def abort(self):
