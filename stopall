@@ -2,8 +2,5 @@
 
 ps aux | grep python | awk '{print $2}' | xargs kill
 
-<<<<<<< HEAD
-#find ./log*.txt -type f -delete
-=======
 find log*.txt -type f -delete
->>>>>>> 2f57701ecb934e47e7ddf0bc535e5cf068e37508
+
