@@ -466,7 +466,7 @@ class Client(object):
         request += ''.join(participants)
         participants.remove(str(self.index))
         self.logwrite(self.log, ','.join(participants) + '\n')
-        self.logwrite(log2, ','.join(participants) + '\n')
+        self.logwrite(leaderLog, ','.join(participants) + '\n')
         # sent out all requests, inform participants of all other participants
         #participants.remove(str(self.index))
         for i,s in zip(participants, p_sock):
