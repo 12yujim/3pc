@@ -242,9 +242,9 @@ class Client(object):
                 lastAct = logfile.readlines()[-1].strip()
             if self.state == self.IDLE:
                 # in middle of protocol and have not yet acknowledged, abort
-                if lastAct not in ['commit', 'abort']:
+                if lastAct != 'done' and lastAct != 'commit':
                     # crash after voteREQ
-                    for i in self.others:
+                    for i in xrange(n):
                         try:
                             connectSocket = socket(AF_INET, SOCK_STREAM)
                             connectSocket.connect((address, self.PORT_BASE + i))
@@ -252,8 +252,59 @@ class Client(object):
                         except:
                             continue
                     aborted = True
+                elif lastAct == 'commit':
+                    # crash after partial commit
+                    for i in xrange(n):
+                        try:
+                            connectSocket = socket(AF_INET, SOCK_STREAM)
+                            connectSocket.connect((address, self.PORT_BASE + i))
+                            self.send(connectSocket, 'commit')
+                        except:
+                            continue
                 else:
                     transaction = False
+            elif self.state == self.PRECOMMIT:
+                # check if any other process has received precommit
+                checkLst = []
+                precommit = False
+                for i in self.others:
+                    try:
+                        connectSocket = socket(AF_INET, SOCK_STREAM)
+                        connectSocket.connect((address, self.PORT_BASE + int(i)))
+                        self.send(connectSocket, 'have commit?')
+                        checkLst.append(connectSocket)
+                    except:
+                        continue
+                (active, _, _) = select(checkLst, [], [], self.TIMEOUT)
+                for sock in active:
+                    data = sock.recv(1024)
+                    if not data:
+                        # socket closed, participant failure
+                        sock.close()
+                    for votes in data.split('\n'):
+                        if (votes == 'yes'):
+                            # go ahead with commit
+                            precommit = True
+                if precommit:
+                    for i in checkLst:
+                        try:
+                            self.send(i, 'precommit')
+                        except:
+                            continue
+                    songName = self.currData.split(',')[0]
+                    if self.currCmd == 'delete':
+                        if songName in self.library:
+                            del self.library[songName]
+                    if self.currCmd == 'add':
+                        url = self.currData.split(',')[1]
+                        self.library[songName] = url
+                else:
+                    for i in checkLst:
+                        try:
+                            self.send(i, 'abort')
+                        except:
+                            continue
+                    aborted = True
             elif self.state < self.ACKNOWLEDGE:
                 # have acknowledged, check if commit
                 if lastAct == 'commit':
@@ -276,12 +327,12 @@ class Client(object):
                     aborted = True
             if transaction:
                 if aborted:
-                    self.abort()
                     self.send(self.master, 'ack abort')
                 else:
                     self.send(self.master, 'ack commit')
             if sock:
                 self.comm_channels.remove(sock)
+            self.abort()
             #self.send(self.master, str(self.index) + ' ' + str(self.leader))
             self.send(self.master, 'coordinator ' + str(self.leader))
 
@@ -436,6 +487,8 @@ class Client(object):
         success = True
         leaderLog = 'leaderDT.txt'
         with open(leaderLog, 'w') as cleanfile:
+            pass
+        with open(self.log, 'w') as cleanfile:
             pass
         writedata = ''
         for songName in self.library:
@@ -613,6 +666,8 @@ class Client(object):
                 continue
         if self.crashPartialCommit[0]:
             sys.exit(0)
+        self.logwrite(self.log, 'done\n')
+        self.logwrite(leaderLog, 'done\n')
         return success
 
     def participantVoteREQ(self, sock, s):
@@ -650,25 +705,28 @@ class Client(object):
         #############
         # PRECOMMIT #
         #############
-        try:
-            data = sock.recv(1024)
-            if not data:
-                # closed socket, coordinator failure
-                sock.close()
-                raise
-            for line in data.split('\n'):
-                if line == '':
-                    continue
-                elif (line == 'abort'):
-                    # protocol aborted
-                    self.logwrite(self.log, 'abort\n')
-                    self.abort()
+        line = ''
+        while line != 'precommit':
+            try:
+                data = sock.recv(1024)
+                if not data:
+                    # closed socket, coordinator failure
+                    sock.close()
+                    raise
+                for line in data.split('\n'):
+                    if line == '':
+                        continue
+                    elif (line == 'abort'):
+                        # protocol aborted
+                        self.logwrite(self.log, 'abort\n')
+                        self.abort()
+                        return
+                    elif (line == 'precommit'):
+                        break
+            except:
+                self.termination(sock)
+                if self.leader == self.index:
                     return
-                elif (line == 'precommit'):
-                    break
-        except:
-            self.termination(sock)
-            return
         # write to log
         self.logwrite(self.log, 'precommit\nack\n')
         coordinatorFailure = False
@@ -678,9 +736,6 @@ class Client(object):
             coordinatorFailure = True
         if self.crashAfterAck:
             sys.exit(0)
-        if coordinatorFailure:
-            self.termination(sock)
-            return
         
 
         ##########
@@ -703,10 +758,8 @@ class Client(object):
                 elif (line == 'commit'):
                     break
         except:
-            self.termination(sock)
-            return
+            pass
         # write to log
-        self.logwrite(self.log, 'commit\n')
         songName = self.currData.split(',')[0]
         if self.currCmd == 'delete':
             if songName in self.library:
@@ -715,6 +768,9 @@ class Client(object):
             url = self.currData.split(',')[1]
             self.library[songName] = url
         # protocol complete, use abort to clear
+        if coordinatorFailure:
+            self.termination(sock)
+            return
         self.abort()
 
     def logwrite(self, log, data):
