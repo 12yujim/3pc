@@ -271,12 +271,12 @@ class Client(object):
             if self.state != self.IDLE:
                 if aborted:
                     self.abort()
-                    self.send(self.master, 'resp abort')
+                    self.send(self.master, 'ack abort')
                 else:
-                    self.send(self.master, 'resp commit')
+                    self.send(self.master, 'ack commit')
             if sock:
                 self.comm_channels.remove(sock)
-            self.send(self.master, str(self.index) + ' ' + str(self.leader))
+            #self.send(self.master, str(self.index) + ' ' + str(self.leader))
             self.send(self.master, 'coordinator ' + str(self.leader))
 
 
@@ -318,7 +318,7 @@ class Client(object):
                                 self.handle_server_comm(sock, data)
                 self.heartbeat(active)
             except Exception, e:
-                self.send(self.master, str(e))
+                #self.send(self.master, str(e))
                 self.close()
                 break
 
@@ -371,25 +371,25 @@ class Client(object):
                 if self.leader == self.index:
                     # begin vote process
                     if self.voteReq(s[0], ','.join(s[1:])):
-                       self.send(sock, 'resp commit')
+                       self.send(sock, 'ack commit')
                        # write to library
                        self.library[s[1]] = s[2]
                     else:
-                       self.send(self.master, 'resp abort')
+                       self.send(self.master, 'ack abort')
                 else:
                     continue
             elif s[0] == 'delete':
                 if self.leader == self.index:
                     # begin vote process
                     if self.voteReq(s[0], s[1]):
-                        self.send(self.master, 'resp commit')
+                        self.send(self.master, 'ack commit')
                         # delete from library
                         if s[1] in self.library:
                             del self.library[s[1]]
                         else:
                             pass
                     else:
-                        self.send(self.master, 'resp abort')
+                        self.send(self.master, 'ack abort')
                 else:
                     continue
             elif s[0] == 'get':

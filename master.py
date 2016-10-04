@@ -51,8 +51,8 @@ class ClientHandler(Thread):
                         wait_ack_lock.acquire()
                         wait_ack = False
                         wait_ack_lock.release()
-                    else:
-                        print s
+                    # else:
+                    #     print s
             except:
                 print sys.exc_info()
                 self.valid = False
