@@ -234,24 +234,29 @@ class Client(object):
         global n
         self.leader = (self.leader + 1) % n
         aborted = False
+        transaction = True
         if self.leader == self.index:
             # you are now the leader
-            # if self.IDLE < self.state < self.ACKNOWLEDGE:
-            #     # in middle of protocol and have not yet acknowledged, abort
-            #     for i in self.others:
-            #         try:
-            #             connectSocket = socket(AF_INET, SOCK_STREAM)
-            #             connectSocket.connect((address, self.PORT_BASE + i))
-            #             self.send(connectSocket, 'abort')
-            #         except:
-            #             continue
-            #     aborted = True
-            if self.IDLE < self.state == self.ACKNOWLEDGE:
+            lastAct = ''
+            with open('leaderDT.txt', 'r') as logfile:
+                lastAct = logfile.readlines()[-1].strip()
+            if self.state == self.IDLE:
+                # in middle of protocol and have not yet acknowledged, abort
+                if lastAct not in ['commit', 'abort']:
+                    # crash after voteREQ
+                    for i in self.others:
+                        try:
+                            connectSocket = socket(AF_INET, SOCK_STREAM)
+                            connectSocket.connect((address, self.PORT_BASE + i))
+                            self.send(connectSocket, 'abort')
+                        except:
+                            continue
+                    aborted = True
+                else:
+                    transaction = False
+            elif self.state < self.ACKNOWLEDGE:
                 # have acknowledged, check if commit
-                lastAct = ''
-                with open('leaderDT.txt', 'r') as logfile:
-                    lastAct = logfile.readlines()[-1]
-                if lastAct.strip() == 'commit':
+                if lastAct == 'commit':
                     # have committed
                     for i in self.others:
                         try:
@@ -269,7 +274,7 @@ class Client(object):
                         except:
                             continue
                     aborted = True
-            if self.state != self.IDLE:
+            if transaction:
                 if aborted:
                     self.abort()
                     self.send(self.master, 'ack abort')
