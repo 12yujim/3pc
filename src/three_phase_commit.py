@@ -109,7 +109,7 @@ class Client(object):
 
                 # The contact may be in a transaction, or possibly died after a transaction.
                 # Either way we move on until all have timed out. This is then a total failure.
-                self.sock.settimeout(self.TIMEOUT)
+                sock.settimeout(self.TIMEOUT)
                 data = sock.recv(1024)
                 if not data:
                     continue
@@ -121,7 +121,6 @@ class Client(object):
                 if not recover:
                     self.upset = ans[1].split(',')
                     self.upset.append(str(self.index))
-
                     return lead
 
                 # If we receive -1 for leader, then we are in a total failure state
