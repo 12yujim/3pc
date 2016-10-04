@@ -276,7 +276,7 @@ class Client(object):
                     self.send(self.master, 'ack commit')
             if sock:
                 self.comm_channels.remove(sock)
-            self.send(self.master, str(self.index) + ' ' + str(self.leader))
+            #self.send(self.master, str(self.index) + ' ' + str(self.leader))
             self.send(self.master, 'coordinator ' + str(self.leader))
 
 
@@ -318,7 +318,7 @@ class Client(object):
                                 self.handle_server_comm(sock, data)
                 self.heartbeat(active)
             except Exception, e:
-                self.send(self.master, str(e))
+                #self.send(self.master, str(e))
                 self.close()
                 break
 
