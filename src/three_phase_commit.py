@@ -95,7 +95,7 @@ class Client(object):
         return sock.accept()
 
     # Determine the current leader on startup. May need to retrieve state if recovering.
-    # Also may be recovering after total failure, so handle that here also *todo*
+    # Also may be recovering after total failure, so handle that here also
     def determineLeader(self, recover):
         global n, address
 
@@ -260,7 +260,7 @@ class Client(object):
             self.state = self.ACKNOWLEDGE
 
 
-    # elect new coordinator        
+    # elect new coordinator and run termination protocol if necessary
     def termination(self, sock=None):
         global n
         self.leader = (self.leader + 1) % n
@@ -453,6 +453,11 @@ class Client(object):
             if s[0] == 'heartbeat':
                 # everything is fine, continue
                 continue
+            if s == 'have commit?':
+                try:
+                    self.send(sock, 'yes')
+                except:
+                    continue
 
     # Handles communication between servers (coord or normal) and master
     def handle_master_comm(self, sock, data):
