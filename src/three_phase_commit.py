@@ -28,14 +28,14 @@ class Client(object):
 
     def __init__(self, index, address, port):
         self.index = index
+        self.leader = -1
         self.library = {}
         self.send_info = []
         self.valid = True
         self.state = self.IDLE
         self.currCmd = None
         self.currData = None
-        self.others = []
-        self.upset  = [str(self.index)]
+        self.upset = [str(self.index)]
 
         self.master = socket(AF_INET, SOCK_STREAM)
         self.my_sock = socket(AF_INET, SOCK_STREAM)
@@ -45,21 +45,31 @@ class Client(object):
         # Read from the data log and see if this is the first time.
         recover = True
         self.log = "log" + str(self.index) + ".txt"
-        store = ''
         try:
             with open(self.log, 'r') as logfile:
-                store = logfile.readline().split()
+                data = logfile.readlines()
+                if data[2].strip().split(',') != ['']:
+                    self.upset = self.upset + data[2].strip().split(',')
+
+                for key, value in [pair.split(',') for pair in data[0].strip().split()]:
+                    self.library[key] = value
+
+                self.determine_state(data[-1].strip())
+
+                if self.state == self.IDLE:
+                    entry = data[1].split()[1].strip().split(',')
+                    if entry[0] == 'add':
+                        self.library[entry[1]] = entry[2]
+                    else:
+                       del self.library[entry[1]]
         except:
             with open(self.log, 'w') as logfile:
                 recover = False
-        for [key,value] in [pair.split(',') for pair in store]:
-            self.library[key] = value 
             
         # Connect with master before determining coordinator.
         (self.master, _) = self.initialize_socket(self.master, port)
         
         self.leader = self.determineLeader(recover) # initialize leader, start check at 0
-        #self.leader = 0
 
         if self.leader == self.index:
             # notify master you are coordinator
@@ -69,6 +79,7 @@ class Client(object):
         self.my_sock.bind((address, self.PORT_BASE + self.index))
         self.my_sock.listen(n)
         self.comm_channels = [self.my_sock, self.master]
+
 
         self.vote = True
         self.crashAfterVote = False
@@ -101,11 +112,18 @@ class Client(object):
                 continue
 
         lead = -1
-        running = []
-        intersection = []
+        running = [str(self.index)]
+        intersection = self.upset
         for i,sock in valid_contacts:
             try:
-                self.send(sock, 'info ' + str(self.index) + ' ' + ','.join(self.upset))
+                if not recover:
+                    self.send(sock, 'info ' + str(self.index) + ' ' + ','.join(self.upset))
+                else:
+                    if str(i) in self.upset:
+                        self.send(sock, 'info ' + str(self.index) + ' ' + ','.join(self.upset))
+                    else:
+                        self.send_info.append(str(i))
+                        continue
 
                 # The contact may be in a transaction, or possibly died after a transaction.
                 # Either way we move on until all have timed out. This is then a total failure.
@@ -117,30 +135,34 @@ class Client(object):
                 ans = data.split('\n')[0].split()
                 lead = int(ans[0])
 
-
                 if not recover:
                     self.upset = ans[1].split(',')
-                    self.upset.append(str(self.index))
                     return lead
 
                 # If we receive -1 for leader, then we are in a total failure state
                 if lead == -1:
-                    running = ans[1].split(',')
+                    running = running + ans[1].split(',')
                     intersection = ans[2].split(',')
 
                     # If intersection of UPs is subset of Running then run termination protocol.
                     if all([p in running for p in intersection]):
                         # Run termination, elect new leader.
-                        try:
-                            with open(self.log, 'r') as logfile:
-                                self.others = logfile.read().split('\n')[2].split(',')
-                        except:
-                            with open('leaderDT.txt', 'r') as logfile:
-                                self.others = logfile.read().split('\n')[2].split(',')
+                        with open(self.log, 'r') as logfile:
+                            lastAct = logfile.readlines()[-1].strip()
 
-                        self.determine_state()
+                        # Determine our last state
+                        self.determine_state(lastAct)
+
+                        self.leader = self.index - 1
+
+                        # Notify everyone we are the leader.
+                        for j,sock2 in valid_contacts:
+                            self.send(sock2, str(self.index) + ' ' + ','.join(self.upset) + ' ' + ' '.join([key + "," + value for key,value in self.library.items()]))
+                            sock2.close()
 
                         self.termination()
+
+                        return self.leader
                     else:
                         # Wait for latest process to wake up.
                         break
@@ -157,12 +179,27 @@ class Client(object):
         if not recover:
             return self.index
 
-        # We've experienced a total failure. See if can decide what to do, if not wait for last process.
+        ############################### Total Failure ################################
+        # Determine our last state.
+        with open(self.log, 'r') as logfile:
+            lastAct = logfile.readlines()[-1].strip()
+
+        self.determine_state(lastAct)
+
+        # If we are the only member of the uspet then complete the wakeup.
+        if len(self.upset) == 1:
+            self.leader = self.index - 1
+
+            self.termination()
+
+            return self.leader
+
         tf_listen = socket(AF_INET, SOCK_STREAM)
         tf_listen.bind((address, self.PORT_BASE + self.index))
         tf_listen.listen(n)
+
         channels = [tf_listen]
-        while True:
+        while self.leader == -1:
             try:
                 (active, _, _) = select(channels, [], [])
 
@@ -178,6 +215,19 @@ class Client(object):
                             channels.remove(sock)
                             continue
 
+                        if ans[0] != 'info':
+                            self.leader = int(ans[0])
+                            try:
+                                lib  = ans[2:]
+                                self.library = {}
+                                for key, value in [pair.split(',') for pair in lib]:
+                                    self.library[key] = value
+                            except:
+                                pass
+                            sock.close()
+                            
+                            return self.leader
+
                         proc_id = ans[1]
                         proc_part = ans[2].split(',')
 
@@ -186,12 +236,12 @@ class Client(object):
                         # Once the last process wakes up it will run the termination protocol.
                         # See if the responder is in our participant list.
                         with open(self.log, 'r') as logfile:
-                            self.others = logfile.read().split('\n')[2].split(',')
+                            self.upset = logfile.read().split('\n')[2].split(',')
 
                         # Send them the current recovered processes and the instersection of UP
-                        if proc_id in self.others:
+                        if proc_id in self.upset:
                             running.append(proc_id)
-                            intersection = ['0'] #[p for p in intersection if p in proc_part]
+                            intersection = [p for p in intersection if p in proc_part]
 
                             self.send(sock, str(lead) + ' ' + ','.join(running) + ' ' + ','.join(intersection))
                         else:
@@ -199,35 +249,16 @@ class Client(object):
             except:
                 break
 
-    def determine_state(self):
-        try:
-            with open(self.log, 'r') as logfile:
-                line = logfile.readline()
-                line = logfile.readline()
-                while (line != ''):
-                    if (line.split()[0] == 'START_3PC'):
-                        self.state = FIRSTVOTE
-                        line = logfile.readline()
-                    if (line == 'yes'):
-                        self.state = PRECOMMIT
-                        line = logfile.readline()
-                    if (line == 'ack'):
-                        self.state = ACKNOWLEDGE
-                    line = logfile.readline()
-        except:
-            with open('leaderDT.txt', 'r') as logfile:
-                line = logfile.readline()
-                line = logfile.readline()
-                while (line != ''):
-                    if (line.split()[0] == 'START_3PC'):
-                        self.state = FIRSTVOTE
-                        line = logfile.readline()
-                    if (line == 'yes'):
-                        self.state = PRECOMMIT
-                        line = logfile.readline()
-                    if (line == 'ack'):
-                        self.state = ACKNOWLEDGE
-                    line = logfile.readline()
+
+    # determine state from the last item written.
+    def determine_state(self, lastact):
+        if lastact == 'commit' or lastact == 'abort' or lastact == 'done':
+            self.state = self.IDLE
+        elif lastact == 'yes' or lastact == 'no':
+            self.state = self.PRECOMMIT
+        else:
+            self.state = self.ACKNOWLEDGE
+
 
     # elect new coordinator        
     def termination(self, sock=None):
@@ -267,7 +298,7 @@ class Client(object):
                 # check if any other process has received precommit
                 checkLst = []
                 precommit = False
-                for i in self.others:
+                for i in self.upset:
                     try:
                         connectSocket = socket(AF_INET, SOCK_STREAM)
                         connectSocket.connect((address, self.PORT_BASE + int(i)))
@@ -309,7 +340,7 @@ class Client(object):
                 # have acknowledged, check if commit
                 if lastAct == 'commit':
                     # have committed
-                    for i in self.others:
+                    for i in self.upset:
                         try:
                             connectSocket = socket(AF_INET, SOCK_STREAM)
                             connectSocket.connect((address, self.PORT_BASE + i))
@@ -317,7 +348,7 @@ class Client(object):
                         except:
                             continue
                 else:
-                    for i in self.others:
+                    for i in self.upset:
                         try:
                             connectSocket = socket(AF_INET, SOCK_STREAM)
                             connectSocket.connect((address, self.PORT_BASE + i))
@@ -333,7 +364,6 @@ class Client(object):
             if sock:
                 self.comm_channels.remove(sock)
             self.abort()
-            #self.send(self.master, str(self.index) + ' ' + str(self.leader))
             self.send(self.master, 'coordinator ' + str(self.leader))
 
 
@@ -344,8 +374,14 @@ class Client(object):
                 # listen for input from all channels
                 if self.state == self.IDLE:
                     # Send info after transaction if we missed someone.
-                    for sock in self.send_info:
-                        self.send(sock, str(self.leader) + ' ' + ','.join(self.upset) + ' ' + ' '.join([key + "," + value for key,value in self.library.items()]))
+                    for i in self.send_info:
+                        connectSocket = socket(AF_INET, SOCK_STREAM)
+                        connectSocket.connect((address, self.PORT_BASE + int(i)))
+
+
+                        self.send(connectSocket, str(self.leader) + ' ' + ','.join(self.upset) + ' ' + ' '.join([key + "," + value for key,value in self.library.items()]))
+                        self.send_info.remove(i)
+                        connectSocket.close()
 
                 if self.index == self.leader:
                     # give coordinator time to send heartbeat
@@ -361,10 +397,10 @@ class Client(object):
                     else:
                         # Are we communicating with master, coord, or other servers?
                         line = sock.recv(1024)
+                        #self.send(self.master, "Got here! " + str(self.index))
                         if not line:
                             self.comm_channels.remove(sock)
                         for data in line.split('\n'):
-                            #self.send(self.master, str(self.index) + ' ' + data)
                             if data == '':
                                 continue
                             if (sock == self.master):
@@ -375,7 +411,7 @@ class Client(object):
                                 self.handle_server_comm(sock, data)
                 self.heartbeat(active)
             except Exception, e:
-                #self.send(self.master, str(e))
+                self.send(self.master, str(e))
                 self.close()
                 break
 
@@ -528,7 +564,6 @@ class Client(object):
         self.logwrite(self.log, ','.join(participants) + '\n')
         self.logwrite(leaderLog, ','.join(participants) + '\n')
         # sent out all requests, inform participants of all other participants
-        #participants.remove(str(self.index))
         for i,s in zip(participants, p_sock):
             try:
                 if not self.crashVoteREQ[0]:
@@ -674,15 +709,15 @@ class Client(object):
         self.state = self.FIRSTVOTE
         self.currCmd = s[1]
         self.currData = s[2]
-        self.others = list(s[3])
-        self.others.remove(str(self.index))
+        self.upset = list(s[3])
+        self.upset.remove(str(self.index))
         # write to DT log
         writedata = ''
         for songName in self.library:
             writedata += '%s,%s ' % (songName, self.library[songName])
         writedata += '\n'
         writedata += 'START_3PC %s,%s\n' % (self.currCmd, self.currData)
-        writedata +=  ','.join(self.others) + '\n'
+        writedata +=  ','.join(self.upset) + '\n'
         vote = 'yes' if self.vote else 'no'
         writedata += vote + '\n'
         self.logwrite(self.log, writedata)
@@ -756,6 +791,7 @@ class Client(object):
                     self.abort()
                     return
                 elif (line == 'commit'):
+                    self.logwrite(self.log, 'commit\n')
                     break
         except:
             pass
@@ -781,7 +817,6 @@ class Client(object):
         self.state = self.IDLE
         self.currCmd = None
         self.currData = None
-        self.others = None
 
     def send(self, sock, s):
         if self.valid:
