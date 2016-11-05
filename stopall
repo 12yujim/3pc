@@ -1,6 +1,0 @@
-#!/bin/bash
-
-ps aux | grep src/three_phase_commit.py | awk '{print $2}' | xargs kill
-
-find *.txt -type f -delete
-

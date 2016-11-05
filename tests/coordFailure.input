@@ -1,8 +1,0 @@
-0 start 3 10000
-1 start 3 10001
-2 start 3 10002
--1 add song1 URL1
-0 crash
--1 add song1 URL2
-0 start 3 10003
-0 get h

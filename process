@@ -1,3 +1,0 @@
-#!/bin/bash
-
-python src/three_phase_commit.py $@
