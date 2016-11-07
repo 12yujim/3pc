@@ -138,7 +138,7 @@ class Replica(Thread):
                 decisionMax = 0
             s = max(decisionMax, proposalMax) + 1
             self.proposals[s] = p
-            propose = 'propose,{},'.format(s) + ';'.join(p)
+            propose = 'propose {} '.format(s) + ' '.join(p)
             self.send(self.leader, propose)
 
     def perform(self, p):
