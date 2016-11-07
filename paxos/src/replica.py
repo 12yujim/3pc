@@ -80,6 +80,7 @@ class Replica(Thread):
                         self.comm_channels.remove(sock)
 
                     for data in line.split('\n'):
+                        data = data.split(' ')
                         if data == '':
                             continue
                         elif data[0] == 'msg':

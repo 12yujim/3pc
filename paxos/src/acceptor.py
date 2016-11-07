@@ -53,7 +53,7 @@ class Acceptor(Thread):
                         if data == '':
                             continue
                         # if receive "phase 1a" with ballot num b, go to p1a
-                        msg = data.split(',')
+                        msg = data.split(' ')
                         if msg[0] == 'p1a':
                             self.p1a(sock, msg[1])
                         elif msg[0] == 'p2a':
