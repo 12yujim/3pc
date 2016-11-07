@@ -104,20 +104,9 @@ class Replica(Thread):
 
     def handleCrash(self, cmd):
         if cmd == 'crash':
-            # figure out how to crash
-            sys.exit(0)
-        elif cmd == 'crashAfterP1b':
-            pass
-        elif cmd == 'crashAfterP2b':
-            pass
+            self.crash()
         else:
-            multiCmd = cmd.split()
-            if multiCmd[0] == 'crashAfterP1a':
-                pass
-            elif multiCmd[0] == 'crashAfterP2a':
-                pass
-            elif multiCmd[0] == 'crashDecision':
-                pass
+            self.send(self.leader, cmd)
 
     def getChat(self):
         self.send(self.master, ','.join(self.chatLog))
@@ -168,4 +157,9 @@ class Replica(Thread):
 
     def send(self, sock, s):
         sock.send(str(s) + '\n')
+
+    def crash(self):
+        # crashes the associated acceptor, replica, and leader
+        crashCmd = "ps aux | grep \"src/server.py {}\" | awk '{print $2}' | xargs kill".format(self.index)
+        subprocess.call(crashCmd)
 
