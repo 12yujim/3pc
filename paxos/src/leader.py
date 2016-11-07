@@ -8,6 +8,8 @@ from socket import SOCK_STREAM, socket, AF_INET, SOL_SOCKET, SO_REUSEADDR
 from select import select
 from operator import itemgetter
 from ast import literal_eval
+from replica import Replica
+from acceptor import Acceptor
 
 address = 'localhost'
 baseport = 20000
@@ -341,72 +343,82 @@ class Commander(Thread):
 
 # Testing
 def main():
-	acc_sock = socket(AF_INET, SOCK_STREAM)
-	acc_sock.setsockopt(SOL_SOCKET, SO_REUSEADDR, 1)
+	# acc_sock = socket(AF_INET, SOCK_STREAM)
+	# acc_sock.setsockopt(SOL_SOCKET, SO_REUSEADDR, 1)
 
-	rep_sock = socket(AF_INET, SOCK_STREAM)
-	rep_sock.setsockopt(SOL_SOCKET, SO_REUSEADDR, 1)
+	# rep_sock = socket(AF_INET, SOCK_STREAM)
+	# rep_sock.setsockopt(SOL_SOCKET, SO_REUSEADDR, 1)
 
-	# Listen for connections, acc
-	acc_sock.bind((address, baseport + 0 + 2))
-	acc_sock.listen(4*n)
+	# # Listen for connections, acc
+	# acc_sock.bind((address, baseport + 0 + 2))
+	# acc_sock.listen(4*n)
 
-	# Listen for connections, replica
-	rep_sock.bind((address, baseport + 0 + 0))
-	rep_sock.listen(4*n)
+	# # Listen for connections, replica
+	# rep_sock.bind((address, baseport + 0 + 0))
+	# rep_sock.listen(4*n)
+	master_sock = socket(AF_INET, SOCK_STREAM)
+	master_sock.setsockopt(SOL_SOCKET, SO_REUSEADDR, 1)
 
-	leader = Leader(0, 'localhost')
+	replica   = Replica(0, 'localhost', 10000)
+	leader    = Leader(0, 'localhost')
+	acceptor  = Acceptor(0, 'localhost')
+
+	# Start the acceptor, then leader, then replica.
+	acceptor.start()
+	time.sleep(.1)
 	leader.start()
+	time.sleep(.1)
+	replica.start()
+	time.sleep(.1)
 
 	time.sleep(.1)
 
-	sock = socket(AF_INET, SOCK_STREAM)
-	sock.setsockopt(SOL_SOCKET, SO_REUSEADDR, 1)
-
-	sock.connect((address, baseport + 0 + 1))
-	# sock.send('propose 0 Hellothere' + '\n')
+	master_sock.connect((address, baseport + 0 + 0))
+	master_sock.send('msg 0 hellothere' + '\n')
 	# sock.send('propose 1 Hey there baby' + '\n')
 	# sock.send('propose 0 Goodbye!' + '\n')
 
-	connections = [acc_sock, rep_sock]
 	while(1):
-		(active, _, _) = select(connections, [], [])
+		pass
+	# connections = [acc_sock, rep_sock]
+	# while(1):
+	# 	(active, _, _) = select(connections, [], [])
 
-		for sock in active:
+	# 	for sock in active:
 
-			if (sock == acc_sock):
-				(newsock, _) = acc_sock.accept()
-				connections.append(newsock)
-				continue
+	# 		if (sock == acc_sock):
+	# 			(newsock, _) = acc_sock.accept()
+	# 			connections.append(newsock)
+	# 			continue
 
-			if (sock == rep_sock):
-				(newsock, _) = rep_sock.accept()
-				connections.append(newsock)
-				continue
+	# 		if (sock == rep_sock):
+	# 			(newsock, _) = rep_sock.accept()
+	# 			connections.append(newsock)
+	# 			continue
 
-			line = sock.recv(1024)
+	# 		line = sock.recv(1024)
 
-			if (line.strip() == ''):
-				connections.remove(sock)
-			else:
-				receive = line.strip().split()
-				if (receive[0] == 'p1a'):
-					message = "p1b 0 " + str((0,0)) + " " + str((0,0,"Hellothere"))
-					print(message)
-					sock.send(message + "\n")
-				elif (receive[0] == 'p2a'):
-					message = "p2b 0 " + str((0,0))
-					print(message)
-					sock.send(message + "\n")
-				elif (receive[0] == 'decision'):
-					#message = "p1b 0 " + str((1,0)) + " " + str((1,0,"I'mamessage!"))
-					print(receive)
-					#sock.send(message + "\n")
-				else:
-					print "Bad Message"
+	# 		if (line.strip() == ''):
+	# 			connections.remove(sock)
+	# 		else:
+	# 			receive = line.strip().split()
+	# 			if (receive[0] == 'p1a'):
+	# 				message = "p1b 0 " + str((0,0)) + " " + str((0,0,"Hellothere"))
+	# 				print(message)
+	# 				sock.send(message + "\n")
+	# 			elif (receive[0] == 'p2a'):
+	# 				message = "p2b 0 " + str((0,0))
+	# 				print(message)
+	# 				sock.send(message + "\n")
+	# 			elif (receive[0] == 'decision'):
+	# 				#message = "p1b 0 " + str((1,0)) + " " + str((1,0,"I'mamessage!"))
+	# 				print(receive)
+	# 				#sock.send(message + "\n")
+	# 			else:
+	# 				print "Bad Message"
 
 
 if __name__ == '__main__':
-    main()
+	main()
 
 
