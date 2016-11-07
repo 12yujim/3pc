@@ -12,54 +12,73 @@ baseport = 20000
 n = 0
 
 class Acceptor(Thread):
-	def __init__(self, index, address):
-		global n, baseport
+    def __init__(self, index, address):
+        global n, baseport
 
-		Thread.__init__(self)
-		self.index = index
-		self.my_port = baseport + self.index*3 + 2
+        Thread.__init__(self)
+        self.index = index
+        self.my_port = baseport + self.index*3 + 2
 
-		self.my_sock = socket(AF_INET, SOCK_STREAM)
-		self.my_sock.setsockopt(SOL_SOCKET, SO_REUSEADDR, 1)
+        self.my_sock = socket(AF_INET, SOCK_STREAM)
+        self.my_sock.setsockopt(SOL_SOCKET, SO_REUSEADDR, 1)
 
-	def run(self):
-		global n, address
+        self.ballot_num = None
+        self.accepted = set()
 
-		# Listen for connections from other servers.
-		self.my_sock.bind((address, self.my_port))
-		self.my_sock.listen(n)
+    def run(self):
+        global n, address
 
-		self.comm_channels = [self.my_sock]
+        # Listen for connections from other servers.
+        self.my_sock.bind((address, self.my_port))
+        self.my_sock.listen(n)
 
-		while(1):
-			(active, _, _) = select(self.comm_channels, [], [])
+        self.comm_channels = [self.my_sock]
 
-			for sock in active:
-				
-				if (sock == self.my_sock):
-					(newsock, _) = self.my_sock.accept()
-					self.comm_channels.append(newsock)
-				else:
-					# Are we communicating with master, coord, or other servers?
-					line = sock.recv(1024)
-					#self.send(self.master, "Got here! " + str(self.index))
-					if not line:
-						self.comm_channels.remove(sock)
+        while(1):
+            (active, _, _) = select(self.comm_channels, [], [])
 
-					for data in line.split('\n'):
-						if data == '':
-							continue
-						
-						#self.send(self.master, str(self.index) + ' received from master')
-						#self.handle_master_comm(sock, data)
+            for sock in active:
+                
+                if (sock == self.my_sock):
+                    (newsock, _) = self.my_sock.accept()
+                    self.comm_channels.append(newsock)
+                else:
+                    # Are we communicating with master, coord, or other servers?
+                    line = sock.recv(1024)
+                    #self.send(self.master, "Got here! " + str(self.index))
+                    if not line:
+                        self.comm_channels.remove(sock)
 
-	def p1a(self):
-		# Send vote for ballot number proposed by leader, if it is highest ballot # received.
-		pass
+                    for data in line.split('\n'):
+                        if data == '':
+                            continue
+                        # if receive "phase 1a" with ballot num b, go to p1a
+                        msg = data.split(',')
+                        if msg[0] == 'phase1a':
+                            self.p1a(sock, msg[1])
+                        elif msg[0] == 'phase2a':
+                            self.p2a(sock, msg[1:])
+                        #self.send(self.master, str(self.index) + ' received from master')
+                        #self.handle_master_comm(sock, data)
 
-	def p2a(self):
-		# Decide on this ballot number for the slot, send back an ack to leader.
-		pass
+    def p1a(self, lead, b):
+        # Send vote for ballot number proposed by leader, if it is highest ballot # received.
+        if (self.ballot_num == None) or (b > self.ballot_num):
+            self.ballot_num = b
+        # send 'phase 1b' + ballot_num + accepted
+        resp = 'phase1b,{}'.format(self.ballot_num)
+        for acc in self.accepted:
+            resp += ',' + acc
+        self.send(lead, resp)
 
-	def send(self, sock, s):
-		sock.send(str(s) + '\n')
+    def p2a(self, lead, pval):
+        b = pval[0]
+        # Decide on this ballot number for the slot, send back an ack to leader.
+        if (self.ballot_num == None) or (b >= self.ballot_num):
+            self.ballot_num = b
+            self.accepted = self.accepted.add(';'.join(pval))
+        resp = 'phase2b,{}'.format(self.ballot_num)
+        self.send(lead, resp)
+
+    def send(self, sock, s):
+        sock.send(str(s) + '\n')

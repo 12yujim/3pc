@@ -15,26 +15,26 @@ n = 0
 
 
 def main():
-	global n, address
+    global n, address
 
-	# Read in command line arguments and start the different server parts.
-	index = int(sys.argv[1])
-	n = int(sys.argv[2])
-	port = int(sys.argv[3])
+    # Read in command line arguments and start the different server parts.
+    index = int(sys.argv[1])
+    n = int(sys.argv[2])
+    port = int(sys.argv[3])
 
-	replica   = Replica(index, address, port)
-	leader 	  = Leader(index, address, port)
-	acceptor  = Acceptor(index, address, port)
+    replica   = Replica(index, address, port)
+    leader    = Leader(index, address)
+    acceptor  = Acceptor(index, address)
 
-	# Start the acceptor, then leader, then replica.
-	acceptor.start()
-	time.sleep(.1)
-	leader.start()
-	time.sleep(.1)
-	replica.start()
-
-
-	
+    # Start the acceptor, then leader, then replica.
+    acceptor.start()
+    time.sleep(.1)
+    leader.start()
+    time.sleep(.1)
+    replica.start()
+    time.sleep(.1)
+    sys.exit(0)
+    
 
 if __name__ == '__main__':
-	main()
+    main()
