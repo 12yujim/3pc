@@ -34,6 +34,7 @@ class Replica(Thread):
         self.proposals = {}
         self.decisions = {}
 
+        self.msgList = []
         self.chatLogFile = 'rep{}.txt'.format(index)
         self.chatLog = []
         try:
@@ -82,6 +83,7 @@ class Replica(Thread):
                         if data == '':
                             continue
                         elif data[0] == 'msg':
+                            self.msgList.append(data[1])
                             self.propose(data[1:])
                         elif data[0] == 'decision':
                             s = data[1]
@@ -154,7 +156,10 @@ class Replica(Thread):
             self.chatLog.append(msg)
             self.log(msg)
             self.slot_num += 1
-            self.ack(cid, len(self.chatLog))
+            if cid in self.msgList:
+                self.msgList.remove(cid)
+                # only receiving process sends ack
+                self.ack(cid, len(self.chatLog))
 
     def log(self, chat):
         with open(self.chatLogFile, 'a') as logfile:
