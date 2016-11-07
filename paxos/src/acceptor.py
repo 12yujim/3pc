@@ -25,6 +25,9 @@ class Acceptor(Thread):
         self.ballot_num = None
         self.accepted = set()
 
+        self.crashAfterP1b = False
+        self.crashAfterP2b = False
+
     def run(self):
         global n, address
 
@@ -53,11 +56,15 @@ class Acceptor(Thread):
                         if data == '':
                             continue
                         # if receive "phase 1a" with ballot num b, go to p1a
-                        msg = data.split(',')
-                        if msg[0] == 'phase1a':
+                        msg = data.split(' ')
+                        if msg[0] == 'p1a':
                             self.p1a(sock, msg[1])
-                        elif msg[0] == 'phase2a':
+                        elif msg[0] == 'p2a':
                             self.p2a(sock, msg[1:])
+                        elif msg[0] == 'crashAfterP1b':
+                            self.crashAfterP1b = True
+                        elif msg[0] == 'crashAfterP2b':
+                            self.crashAfterP2b = True
                         #self.send(self.master, str(self.index) + ' received from master')
                         #self.handle_master_comm(sock, data)
 
@@ -66,19 +73,28 @@ class Acceptor(Thread):
         if (self.ballot_num == None) or (b > self.ballot_num):
             self.ballot_num = b
         # send 'phase 1b' + ballot_num + accepted
-        resp = 'phase1b,{}'.format(self.ballot_num)
+        resp = 'p1b {}'.format(self.ballot_num)
         for acc in self.accepted:
-            resp += ',' + acc
+            resp += ' ' + acc
         self.send(lead, resp)
+        self.crash()
 
     def p2a(self, lead, pval):
         b = pval[0]
         # Decide on this ballot number for the slot, send back an ack to leader.
         if (self.ballot_num == None) or (b >= self.ballot_num):
             self.ballot_num = b
-            self.accepted = self.accepted.add(';'.join(pval))
-        resp = 'phase2b,{}'.format(self.ballot_num)
+            self.accepted = self.accepted.add(' '.join(pval))
+        resp = 'p2b {}'.format(self.ballot_num)
         self.send(lead, resp)
+        self.crash()
 
     def send(self, sock, s):
         sock.send(str(s) + '\n')
+
+
+    def crash(self):
+        # crashes the associated acceptor, replica, and leader
+        crashCmd = "ps aux | grep \"src/server.py {}\" | awk '{print $2}' | xargs kill".format(self.index)
+        subprocess.call(crashCmd)
+
