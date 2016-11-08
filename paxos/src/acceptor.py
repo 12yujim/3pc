@@ -10,7 +10,7 @@ from ast import literal_eval
 
 address = 'localhost'
 baseport = 20000
-n = 4
+n = 0
 
 class Acceptor(Thread):
     def __init__(self, index, address):
@@ -34,7 +34,7 @@ class Acceptor(Thread):
 
         # Listen for connections from other servers.
         self.my_sock.bind((address, self.my_port))
-        self.my_sock.listen(100*n)
+        self.my_sock.listen(n)
 
         self.comm_channels = [self.my_sock]
 
@@ -53,7 +53,7 @@ class Acceptor(Thread):
                     except:
                         continue
                     #self.send(self.master, "Got here! " + str(self.index))
-                    if not line:
+                    if line == '':
                         self.comm_channels.remove(sock)
 
                     for data in line.split('\n'):
@@ -61,11 +61,12 @@ class Acceptor(Thread):
                             continue
                         # if receive "phase 1a" with ballot num b, go to p1a
                         msg = data.split(' ')
+                        print(msg)
                         if msg[0] == 'p1a':
                             self.p1a(sock, self.tup(msg[2:]))
 
                         elif msg[0] == 'p2a':
-                            self.p2a(sock, self.tup(msg[2:]))
+                            self.p2a(sock, msg[1:])
                         elif msg[0] == 'crashAfterP1b':
                             self.crashAfterP1b = True
                         elif msg[0] == 'crashAfterP2b':
@@ -85,12 +86,14 @@ class Acceptor(Thread):
             self.crash()
 
     def p2a(self, lead, pval):
-        b = pval[0]
+        pvalTup = self.tup(pval[1:])
+
+        b = pvalTup[0]
         # Decide on this ballot number for the slot, send back an ack to leader.
         if (self.comp_ballots(b, self.ballot_num) > -1):
             self.ballot_num = b
 
-            self.accepted.add(pval)
+            self.accepted.add(str(pvalTup))
         resp = 'p2b {} {}'.format(self.index, self.ballot_num)
         self.send(lead, resp)
 
@@ -98,16 +101,20 @@ class Acceptor(Thread):
             self.crash()
 
     def send(self, sock, s):
+        print("Acceptor " + s)
         sock.send(str(s) + '\n')
 
 
     def crash(self):
         # crashes the associated acceptor, replica, and leader
-        crashCmd = "ps aux | grep \"src/server.py {}\" | awk '{{print $2}}' | xargs kill".format(self.index)
+        crashCmd = "ps aux | grep \"src/server.py {}\" | awk '{{#print $2}}' | xargs kill".format(self.index)
         subprocess.call(crashCmd)
 
     def tup(self, sl):
         return literal_eval(' '.join(sl))
+
+    def tup2str(self, t):
+        return '({},{})'.format(t[0], t[1])
 
     def comp_ballots(self, b1, b2):
         if b1 == None:

@@ -54,7 +54,7 @@ class Replica(Thread):
         self.my_sock.bind((address, self.my_port))
         self.my_sock.listen(100*n)
 
-        print("listening for master")
+        #print("listening for master")
 
         # Listen for master connection
         self.master.bind((address, self.master_port))
@@ -63,7 +63,7 @@ class Replica(Thread):
 
         self.comm_channels = [self.master, self.leader, self.my_sock]
 
-        print("Accepted")
+        #print("Accepted")
 
         while(1):
 
@@ -86,6 +86,7 @@ class Replica(Thread):
 
                     for unparsed in line.split('\n'):
                         data = unparsed.split(' ')
+
                         if data == ['']:
                             continue
                         elif data[0] == 'msg':
@@ -121,8 +122,8 @@ class Replica(Thread):
 
     def ack(self, msgID, seqID):
         ackMsg = 'ack {} {}'.format(msgID, seqID)
+        print(ackMsg)
         self.send(self.master, ackMsg)
-
 
     def propose(self, p):
         # Propose a clients message to the next available slot.
@@ -175,7 +176,7 @@ class Replica(Thread):
 
     def crash(self):
         # crashes the associated acceptor, replica, and leader
-        crashCmd = "ps aux | grep \"src/server.py {}\" | awk '{{print $2}}' | xargs kill".format(self.index)
+        crashCmd = "ps aux | grep \"src/server.py {}\" | awk '{{#print $2}}' | xargs kill".format(self.index)
         subprocess.call(crashCmd)
 
     def tup(self, sl):
