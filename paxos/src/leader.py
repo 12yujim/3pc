@@ -13,10 +13,10 @@ from acceptor import Acceptor
 
 address = 'localhost'
 baseport = 20000
-n = 3
+n = 0
 
 class Leader(Thread):
-	def __init__(self, index, address):
+	def __init__(self, total, index, address):
 		global n, baseport
 
 		Thread.__init__(self)
@@ -26,6 +26,7 @@ class Leader(Thread):
 		self.my_sock = socket(AF_INET, SOCK_STREAM)
 		self.my_sock.setsockopt(SOL_SOCKET, SO_REUSEADDR, 1)
 
+		n = total
 		self.proposals 	= {}
 		self.active 	= False
 		self.ballot_num = (0, self.index)
@@ -214,6 +215,7 @@ class Scout(Thread):
 						# Update wait_for and terminate if we have received a majority
 						print(int(response[1]))
 						self.wait_for.remove(int(response[1]))
+						print(self.wait_for)
 						if (len(self.wait_for) < self.num_acc/2.0):
 							print("IN ADOPTED")
 							message = "adopted " + str(self.b) + " " + ' '.join([str(pval) for pval in self.pvalues])

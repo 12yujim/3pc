@@ -37,7 +37,7 @@ class Replica(Thread):
 
         self.msgList = []
         self.chatLogFile = 'rep{}.txt'.format(index)
-        self.chatLog = ['test', 'chat']
+        self.chatLog = []
         try:
             with open(self.chatLogFile, 'r') as logfile:
                 self.chatLog = logfile.read().split(',')
@@ -68,12 +68,9 @@ class Replica(Thread):
 
         while(1):
 
-            self.send(self.master, 'begin listening')
             (active, _, _) = select(self.comm_channels, [], [])
 
             for sock in active:
-
-                self.send(self.master, 'gotSomething')
                 
                 if (sock == self.my_sock):
                     (newsock, _) = self.my_sock.accept()
@@ -87,6 +84,7 @@ class Replica(Thread):
 
                     for unparsed in line.split('\n'):
                         data = unparsed.split(' ')
+                        self.send(self.master, data)
                         if data == '':
                             continue
                         elif data[0] == 'msg':
@@ -147,6 +145,7 @@ class Replica(Thread):
 
             self.proposals[s] = p
             propose = 'propose ' + str(s) + ' ' + str(p)
+            self.send(self.master, propose)
             self.send(self.leader, propose)
 
     def perform(self, p):

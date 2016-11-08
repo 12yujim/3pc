@@ -86,7 +86,7 @@ class Acceptor(Thread):
             self.crash()
 
     def p2a(self, lead, pval):
-        b = pval[0]
+        b = pval[1]
         # Decide on this ballot number for the slot, send back an ack to leader.
         if (self.ballot_num == None) or (b >= self.ballot_num):
             self.ballot_num = b
