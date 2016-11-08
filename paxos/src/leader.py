@@ -239,7 +239,7 @@ class Scout(Thread):
 
 	def tup(self, sl):
 		print sl
-		return literal_eval(','.join(sl))
+		return literal_eval(' '.join(sl))
 
 	def format_pvals(self, sl):
 		ret = []
