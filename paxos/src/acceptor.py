@@ -13,10 +13,11 @@ baseport = 20000
 n = 0
 
 class Acceptor(Thread):
-    def __init__(self, index, address, lock):
+    def __init__(self, total, index, address, lock):
         global n, baseport
 
         Thread.__init__(self)
+        n = total
         self.index = index
         self.my_port = baseport + self.index*3 + 2
 
@@ -97,7 +98,8 @@ class Acceptor(Thread):
 
             self.accepted.add(str(pvalTup))
             with self.printLock:
-                print(pvalTup)
+                #print(pvalTup)
+                pass
         resp = 'p2b {} {}'.format(self.index, self.ballot_num)
         self.send(lead, resp)
 
@@ -111,7 +113,7 @@ class Acceptor(Thread):
 
     def crash(self):
         # crashes the associated acceptor, replica, and leader
-        crashCmd = "ps aux | grep \"src/server.py {}\" | awk '{{#print $2}}' | xargs kill".format(self.index)
+        crashCmd = "ps aux | grep \"src/server.py {}\" | awk '{{print $2}}' | xargs kill".format(self.index)
         subprocess.call(crashCmd)
 
     def tup(self, sl):

@@ -518,9 +518,9 @@ def main():
 	master_sock4 = socket(AF_INET, SOCK_STREAM)
 	master_sock4.setsockopt(SOL_SOCKET, SO_REUSEADDR, 1)
 
-	replica   = Replica(0, 'localhost', 10000, printLock)
+	replica   = Replica(3, 0, 'localhost', 10000, printLock)
 	leader    = Leader(3, 0, 'localhost', printLock)
-	acceptor  = Acceptor(0, 'localhost', printLock)
+	acceptor  = Acceptor(3, 0, 'localhost', printLock)
 
 	# Start the acceptor, then leader, then replica.
 	acceptor.start()
@@ -534,9 +534,9 @@ def main():
 
 	master_sock.connect((address, 10000))
 
-	replica   = Replica(1, 'localhost', 10001, printLock)
+	replica   = Replica(3, 1, 'localhost', 10001, printLock)
 	leader    = Leader(3, 1, 'localhost', printLock)
-	acceptor  = Acceptor(1, 'localhost', printLock)
+	acceptor  = Acceptor(3, 1, 'localhost', printLock)
 
 	# Start the acceptor, then leader, then replica.
 	acceptor.start()
@@ -550,9 +550,9 @@ def main():
 
 	master_sock2.connect((address, 10001))
 
-	replica   = Replica(2, 'localhost', 10002, printLock)
+	replica   = Replica(3, 2, 'localhost', 10002, printLock)
 	leader    = Leader(3, 2, 'localhost', printLock)
-	acceptor  = Acceptor(2, 'localhost', printLock)
+	acceptor  = Acceptor(3, 2, 'localhost', printLock)
 
 	# Start the acceptor, then leader, then replica.
 	acceptor.start()

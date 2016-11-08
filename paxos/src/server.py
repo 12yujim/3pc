@@ -24,9 +24,9 @@ def main():
 
     lock = Lock()
 
-    replica   = Replica(index, address, port, lock)
+    replica   = Replica(n, index, address, port, lock)
     leader    = Leader(n, index, address, lock)
-    acceptor  = Acceptor(index, address, lock)
+    acceptor  = Acceptor(n, index, address, lock)
 
     # Start the acceptor, then leader, then replica.
     acceptor.start()

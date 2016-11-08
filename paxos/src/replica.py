@@ -10,14 +10,15 @@ from ast import literal_eval
 
 address = 'localhost'
 baseport = 20000
-n = 4
+n = 0
 
 class Replica(Thread):
 
-    def __init__(self, index, address, port, lock):
+    def __init__(self, total, index, address, port, lock):
         global n, baseport
 
         Thread.__init__(self)
+        n = total
         self.index = index
         self.master_port = port
         self.my_port = baseport + self.index*3
@@ -109,17 +110,23 @@ class Replica(Thread):
                         elif data[0] == 'get' and data[1] == 'chatLog':
                             self.getChat()
                         elif 'crash' in unparsed:
-                            self.handleCrash(data[0])
+                            self.handleCrash(data)
 
 
     def handleCrash(self, cmd):
-        if cmd == 'crash':
+        if cmd[0] == 'crash':
             self.crash()
+        elif 'crashAfter'in cmd[0]:
+            acceptorSock = socket(AF_INET, SOCK_STREAM)
+            acceptorSock.setsockopt(SOL_SOCKET, SO_REUSEADDR, 1)
+            self.send(acceptorSock, cmd)
+            time.sleep(.1)
+            acceptorSock.close()
         else:
             self.send(self.leader, cmd)
 
     def getChat(self):
-        print(self.chatLog)
+        #print(self.chatLog)
         self.send(self.master, 'chatLog ' + ','.join(self.chatLog))
 
     def ack(self, msgID, seqID):
@@ -165,8 +172,8 @@ class Replica(Thread):
             cid = p[0]
             msg = p[1]
             with self.lock:
-                print('performing {}'.format(self.index))
-                print(msg)
+                #print('performing {}'.format(self.index))
+                #print(msg)
                 pass
             self.chatLog.append(msg)
             self.log(msg)
@@ -185,6 +192,7 @@ class Replica(Thread):
         sock.send(str(s) + '\n')
 
     def crash(self):
+        self.send(self.master, 'noooo RIP me')
         # crashes the associated acceptor, replica, and leader
         crashCmd = "ps aux | grep \"src/server.py {}\" | awk '{{print $2}}' | xargs kill".format(self.index)
         subprocess.call(crashCmd)

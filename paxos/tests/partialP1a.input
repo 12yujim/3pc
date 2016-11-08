@@ -1,0 +1,14 @@
+0 start 4 10021
+1 start 4 10022
+2 start 4 10023
+3 start 4 10024
+0 msg 0 WhatsYourName
+-1 waitForAck 0
+1 crashP1a 0 1 2
+1 msg 1 Alice
+3 msg 2 Carol
+-1 waitForAck 2
+0 get chatLog
+2 get chatLog
+3 get chatLog
+exit
