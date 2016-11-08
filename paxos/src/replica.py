@@ -36,7 +36,7 @@ class Replica(Thread):
 
         self.msgList = []
         self.chatLogFile = 'rep{}.txt'.format(index)
-        self.chatLog = []
+        self.chatLog = ['test', 'chat']
         try:
             with open(self.chatLogFile, 'r') as logfile:
                 self.chatLog = logfile.read().split(',')
@@ -65,9 +65,13 @@ class Replica(Thread):
         self.send(self.master, "Accepted master connection " + str(self.index))
 
         while(1):
+
+            self.send(self.master, 'begin listening')
             (active, _, _) = select(self.comm_channels, [], [])
 
             for sock in active:
+
+                self.send(self.master, 'gotSomething')
                 
                 if (sock == self.my_sock):
                     (newsock, _) = self.my_sock.accept()
@@ -79,8 +83,8 @@ class Replica(Thread):
                     if not line:
                         self.comm_channels.remove(sock)
 
-                    for data in line.split('\n'):
-                        data = data.split(' ')
+                    for unparsed in line.split('\n'):
+                        data = unparsed.split(' ')
                         if data == '':
                             continue
                         elif data[0] == 'msg':
@@ -97,7 +101,7 @@ class Replica(Thread):
                                 self.perform(p2)
                         elif data[0] == 'get' and data[1] == 'chatLog':
                             self.getChat()
-                        else:
+                        elif 'crash' in unparsed:
                             self.handleCrash(data)
                         #self.send(self.master, str(self.index) + ' received from master')
                         #self.handle_master_comm(sock, data)
@@ -160,6 +164,6 @@ class Replica(Thread):
 
     def crash(self):
         # crashes the associated acceptor, replica, and leader
-        crashCmd = "ps aux | grep \"src/server.py {}\" | awk '{print $2}' | xargs kill".format(self.index)
+        crashCmd = "ps aux | grep \"src/server.py {}\" | awk '{{print $2}}' | xargs kill".format(self.index)
         subprocess.call(crashCmd)
 

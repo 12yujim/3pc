@@ -58,7 +58,8 @@ class Acceptor(Thread):
                         # if receive "phase 1a" with ballot num b, go to p1a
                         msg = data.split(' ')
                         if msg[0] == 'p1a':
-                            self.p1a(sock, msg[1])
+                            # can disregard leader id
+                            self.p1a(sock, eval(msg[2]))
                         elif msg[0] == 'p2a':
                             self.p2a(sock, msg[1:])
                         elif msg[0] == 'crashAfterP1b':
@@ -69,15 +70,18 @@ class Acceptor(Thread):
                         #self.handle_master_comm(sock, data)
 
     def p1a(self, lead, b):
+        print b
         # Send vote for ballot number proposed by leader, if it is highest ballot # received.
-        if (self.ballot_num == None) or (b > self.ballot_num):
-            self.ballot_num = b
+        if (self.ballot_num == None) or (b[0] > self.ballot_num):
+            self.ballot_num = b[0]
         # send 'phase 1b' + ballot_num + accepted
-        resp = 'p1b {}'.format(self.ballot_num)
+        resp = 'p1b {} {} {}'.format(self.index, self.ballot_num, b[1])
         for acc in self.accepted:
             resp += ' ' + acc
+        print resp
         self.send(lead, resp)
-        self.crash()
+        if self.crashAfterP1b:
+            self.crash()
 
     def p2a(self, lead, pval):
         b = pval[0]
@@ -87,7 +91,8 @@ class Acceptor(Thread):
             self.accepted = self.accepted.add(' '.join(pval))
         resp = 'p2b {}'.format(self.ballot_num)
         self.send(lead, resp)
-        self.crash()
+        if self.crashAfterP2b:
+            self.crash()
 
     def send(self, sock, s):
         sock.send(str(s) + '\n')
@@ -95,6 +100,6 @@ class Acceptor(Thread):
 
     def crash(self):
         # crashes the associated acceptor, replica, and leader
-        crashCmd = "ps aux | grep \"src/server.py {}\" | awk '{print $2}' | xargs kill".format(self.index)
+        crashCmd = "ps aux | grep \"src/server.py {}\" | awk '{{print $2}}' | xargs kill".format(self.index)
         subprocess.call(crashCmd)
 

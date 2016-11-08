@@ -107,6 +107,7 @@ class Leader(Thread):
 
 
 						elif (received[0] == "preempted"):
+							print received
 							new_ballot_num = self.tup(received[1:3])
 							# Update our ballot number if a larger one is found.
 							if (self.comp_ballots(new_ballot_num, self.ballot_num) == 1):
@@ -185,7 +186,7 @@ class Scout(Thread):
 	def run(self):
 		# Send a p1a message to all acceptors.
 		for i, sock in zip(range(self.num_acc),self.acc_sockets):
-			message = "p1a " + str(self.leader_id) + " " + str(self.b)
+			message = "p1a " + str(self.leader_id) + " " + ','.join(map(str, self.b))
 			print(message)
 			# Send message to all acceptors
 			sock.send(message + "\n")
@@ -202,7 +203,7 @@ class Scout(Thread):
 
 				response = line.strip().split(' ')
 				if (response[0] == "p1b"):
-					print(self.tup(response[2:4]))
+					print(response)
 					if (self.tup(response[2:4]) == self.b):
 						# Add the response to the list of our pvalues.
 						pvals = self.format_pvals(response[4:])
@@ -223,6 +224,7 @@ class Scout(Thread):
 							sys.exit()
 					# We received a ballot greater than our leaders.
 					else:
+						print response
 						message = "preempted " + str(self.tup(response[2:4]))
 						print(message)
 
@@ -235,7 +237,8 @@ class Scout(Thread):
 					print line
 
 	def tup(self, sl):
-		return literal_eval(' '.join(sl))
+		print sl
+		return literal_eval(','.join(sl))
 
 	def format_pvals(self, sl):
 		ret = []
