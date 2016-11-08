@@ -62,7 +62,6 @@ class Acceptor(Thread):
                         # if receive "phase 1a" with ballot num b, go to p1a
                         msg = data.split(' ')
                         if msg[0] == 'p1a':
-                            print(msg)
                             self.p1a(sock, self.tup(msg[2:]))
 
                         elif msg[0] == 'p2a':
@@ -73,7 +72,6 @@ class Acceptor(Thread):
                             self.crashAfterP2b = True
 
     def p1a(self, lead, b):
-        print b
         # Send vote for ballot number proposed by leader, if it is highest ballot # received.
         if (self.comp_ballots(b, self.ballot_num) > 0):
             self.ballot_num = b
@@ -91,7 +89,7 @@ class Acceptor(Thread):
         # Decide on this ballot number for the slot, send back an ack to leader.
         if (self.comp_ballots(b, self.ballot_num) > -1):
             self.ballot_num = b
-            print(pval)
+
             self.accepted.add(pval)
         resp = 'p2b {} {}'.format(self.index, self.ballot_num)
         self.send(lead, resp)
