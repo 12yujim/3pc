@@ -86,12 +86,12 @@ class Acceptor(Thread):
 
     def p2a(self, lead, pval):
         pvalTup = self.tup(pval[1:])
-        print(pvalTup)
+        #print(pvalTup)
         b = pvalTup[0]
         # Decide on this ballot number for the slot, send back an ack to leader.
         if (self.comp_ballots(b, self.ballot_num) > -1):
             self.ballot_num = b
-            self.accepted = self.accepted.add(' '.join(pval))
+            self.accepted.add(' '.join(pval))
         resp = 'p2b {} {}'.format(self.index, self.ballot_num)
         self.send(lead, resp)
 

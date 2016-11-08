@@ -293,8 +293,11 @@ class Scout(Thread):
 
 	def format_pvals(self, sl):
 		ret = []
+		with self.lock:
+			print(sl)
+			pass
 		for i in range(len(sl)/5):
-			ret.append(self.tup(sl[5*i:5*i+5]))
+			ret.append(self.tup(sl[5*i + 1:5*i+6]))
 
 		return ret
 
@@ -506,7 +509,7 @@ def main():
 	master_sock3.setsockopt(SOL_SOCKET, SO_REUSEADDR, 1)
 
 	replica   = Replica(0, 'localhost', 10000)
-	leader    = Leader(1, 0, 'localhost', printLock)
+	leader    = Leader(2, 0, 'localhost', printLock)
 	acceptor  = Acceptor(0, 'localhost')
 
 	# Start the acceptor, then leader, then replica.
@@ -522,7 +525,7 @@ def main():
 	master_sock.connect((address, 10000))
 
 	replica   = Replica(1, 'localhost', 10001)
-	leader    = Leader(3, 1, 'localhost', printLock)
+	leader    = Leader(2, 1, 'localhost', printLock)
 	acceptor  = Acceptor(1, 'localhost')
 
 	# Start the acceptor, then leader, then replica.
@@ -537,28 +540,28 @@ def main():
 
 	master_sock2.connect((address, 10001))
 
-	replica   = Replica(2, 'localhost', 10002)
-	leader    = Leader(3, 2, 'localhost', printLock)
-	acceptor  = Acceptor(2, 'localhost')
+	# replica   = Replica(2, 'localhost', 10002)
+	# leader    = Leader(3, 2, 'localhost', printLock)
+	# acceptor  = Acceptor(2, 'localhost')
 
-	# Start the acceptor, then leader, then replica.
-	acceptor.start()
-	time.sleep(.1)
-	leader.start()
-	time.sleep(.1)
-	replica.start()
-	time.sleep(.1)
+	# # Start the acceptor, then leader, then replica.
+	# acceptor.start()
+	# time.sleep(.1)
+	# leader.start()
+	# time.sleep(.1)
+	# replica.start()
+	# time.sleep(.1)
 
-	print("ALL SERVERS STARTED")
+	# print("ALL SERVERS STARTED")
 
-	time.sleep(.1)
+	# time.sleep(.1)
 
-	master_sock3.connect((address, 10002))
+	# master_sock3.connect((address, 10002))
 	master_sock.send('msg 0 WhatsYourName' + '\n')
 	time.sleep(.1)
 	master_sock2.send('msg 1 Alice' + '\n')
-	time.sleep(.1)
-	master_sock3.send('msg 2 Bob' + '\n')
+	# time.sleep(.1)
+	# master_sock3.send('msg 2 Bob' + '\n')
 
 	while(1):
 		pass

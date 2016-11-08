@@ -23,7 +23,7 @@ def main():
     port = int(sys.argv[3])
 
     replica   = Replica(index, address, port)
-    leader    = Leader(n, index, address)
+    leader    = Leader(n, index, address, Lock())
     acceptor  = Acceptor(index, address)
 
     # Start the acceptor, then leader, then replica.
