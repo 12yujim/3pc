@@ -30,17 +30,21 @@ class Leader(Thread):
 		self.active 	= False
 		self.ballot_num = (0, self.index)
 
+		self.crashP1a = (False, [])
+		self.crashP2a = (False, [])
+		self.crashDecision = (False, [])
+
 	def run(self):
 		global n, address
 
 		# Listen for connections
 		self.my_sock.bind((address, self.my_port))
-		self.my_sock.listen(3*n)
+		self.my_sock.listen(100*n)
 
 		self.comm_channels = [self.my_sock]
 
 		# Spawn a scout
-		scout = Scout(self.index, n, self.ballot_num)
+		scout = Scout(self.index, n, self.ballot_num, self.crashP1a)
 		scout.start()
 		while(1):
 			(active, _, _) = select(self.comm_channels, [], [])
@@ -75,7 +79,7 @@ class Leader(Thread):
 								if self.active:
 									# Spawn Commander.
 									print(str((self.ballot_num, int(received[1]), self.tup(received[2:]))))
-									commander = Commander(self.index, n, (self.ballot_num, int(received[1]), self.tup(received[2:])))
+									commander = Commander(self.index, n, (self.ballot_num, int(received[1]), self.tup(received[2:])), self.crashP2a, self.crashDecision)
 									commander.start()
 								
 						elif (received[0] == "adopted"):
@@ -102,7 +106,7 @@ class Leader(Thread):
 							# Spawn commanders for all proposals.
 							for slot in self.proposals:
 								# Spawn commander
-								commander = Commander(self.index, n, (self.ballot_num, slot, self.proposals[slot][1]))
+								commander = Commander(self.index, n, (self.ballot_num, slot, self.proposals[slot][1]), self.crashP2a, self.crashDecision)
 								commander.start()
 
 							self.active = True
@@ -117,11 +121,27 @@ class Leader(Thread):
 								self.ballot_num = (new_ballot_num[0] + 1, self.index)
 
 								# Spawn a scout.
-								scout = Scout(self.index, n, self.ballot_num)
+								scout = Scout(self.index, n, self.ballot_num, self.crashP1a)
 								scout.start()
 
+						elif (received[0] == "crashP1a"):
+							print("CRASH! " + str(self.index))
+							send_to = received[1:]
+
+							self.crashP1a = (True, send_to)
+
+						elif (received[0] == "crashP2a"):
+							send_to = received[1:]
+
+							self.crashP2a = (True, send_to)
+
+						elif (received[0] == "crashDecision"):
+							send_to = received[1:]
+
+							self.crashDecision = (True, send_to)
+
 						else:
-							print line
+							print "Unknown input: " + line
 						
 						#self.send(self.master, str(self.index) + ' received from master')
 						#self.handle_master_comm(sock, data)
@@ -148,16 +168,22 @@ class Leader(Thread):
 
 	def format_pvals(self, sl):
 		ret = []
-		for i in range(len(sl)/3):
-			ret.append(self.tup(sl[i:i+3]))
+		for i in range(len(sl)/5):
+			print("MMMMM " + str(sl[5*i:5*i+5]))
+			ret.append(self.tup(sl[5*i:5*i+5]))
 
 		return ret
+
+	def crash(self):
+		# crashes the associated acceptor, replica, and leader
+		crashCmd = "ps aux | grep \"src/server.py {}\" | awk '{{print $2}}' | xargs kill".format(self.index)
+		subprocess.call(crashCmd, shell=True)
 
 
 
 
 class Scout(Thread):
-	def __init__(self, lead_id, n, ballot):
+	def __init__(self, lead_id, n, ballot, crashP1a):
 		global address, baseport
 
 		Thread.__init__(self)
@@ -165,7 +191,8 @@ class Scout(Thread):
 		self.leader_id = lead_id
 		self.num_acc   = n
 		self.b 		   = ballot
-		self.timeout   = .05
+		self.timeout   = 2
+		self.crashP1a  = crashP1a
 
 		self.wait_for = [i for i in range(n)]
 		self.pvalues  = []
@@ -179,7 +206,8 @@ class Scout(Thread):
 
 	def run(self):
 		# Broadast p1a messages.
-		self.send_p1a()
+		print self.crashP1a
+		self.send_p1a(self.crashP1a)
 
 		while(1):
 			(active, _, _) = select(self.acc_sockets, [], [], self.timeout)
@@ -190,7 +218,7 @@ class Scout(Thread):
 				self.pvalues 	 = []
 				self.acc_sockets = []
 
-				self.send_p1a()
+				self.send_p1a(self.crashP1a)
 
 
 			for sock in active:
@@ -222,6 +250,11 @@ class Scout(Thread):
 							self.lead_sock.send(message + "\n")
 							print(message)
 
+							for sock in self.acc_sockets:
+								sock.close()
+
+							self.lead_sock.close()
+
 							sys.exit()
 					# We received a ballot greater than our leaders.
 					else:
@@ -231,6 +264,11 @@ class Scout(Thread):
 
 						# Send to leader.
 						self.lead_sock.send(message + "\n")
+
+						for sock in self.acc_sockets:
+							sock.close()
+
+						self.lead_sock.close()
 
 						sys.exit()
 
@@ -243,12 +281,12 @@ class Scout(Thread):
 
 	def format_pvals(self, sl):
 		ret = []
-		for i in range(len(sl)/3):
-			ret.append(self.tup(sl[i:i+3]))
+		for i in range(len(sl)/5):
+			ret.append(self.tup(sl[5*i:5*i+5]))
 
 		return ret
 
-	def send_p1a(self):
+	def send_p1a(self, crashP1a):
 		# Connect to all available acceptors.
 		for i in range(self.num_acc):
 			sock = socket(AF_INET, SOCK_STREAM)
@@ -267,37 +305,37 @@ class Scout(Thread):
 			message = "p1a " + str(self.leader_id) + " " + str(self.b)
 			print(message)
 			# Send message to all acceptors
-			sock.send(message + "\n")
+			if ((not crashP1a[0]) or (crashP1a[0] and i in crashP1a[1])):
+				sock.send(message + "\n")
+
+		if (crashP1a[0]):
+			self.crash()
+
+	def crash(self):
+		# crashes the associated acceptor, replica, and leader
+		crashCmd = "ps aux | grep \"src/server.py {}\" | awk '{{print $2}}' | xargs kill".format(self.leader_id)
+		print(crashCmd)
+		subprocess.call(crashCmd, shell=True)
 
 
 
 class Commander(Thread):
-	def __init__(self, lead_id, n, pval):
+	def __init__(self, lead_id, n, pval, crashP2a, crashDecision):
 		global address, baseport
 
 		Thread.__init__(self)
 
 		self.leader_id = lead_id
 		self.num_acc   = n
+		self.timeout   = 2
+		self.crashP2a  = crashP2a
+		self.crashDecision = crashDecision
 
 		self.wait_for = [i for i in range(n)]
 		self.pval = pval
 
 		self.acc_sockets = []
 		self.rep_sockets = []
-
-		# Establish connections with all acceptors.
-		for i in range(self.num_acc):
-			sock = socket(AF_INET, SOCK_STREAM)
-			sock.setsockopt(SOL_SOCKET, SO_REUSEADDR, 1)
-
-			try:
-				sock.connect((address, baseport + i*3 + 2))
-
-				self.acc_sockets.append(sock)
-			except:
-				pass
-
 
 		# Establish connections with all replicas.
 		for i in range(self.num_acc):
@@ -319,14 +357,17 @@ class Commander(Thread):
 
 	def run(self):
 		# Send a p2a message to all acceptors.
-		for i, sock in zip(range(self.num_acc),self.acc_sockets):
-			message = "p2a " + str(self.leader_id) + " " + str(self.pval)
-			print(i, message)
-			# Send message to all acceptors
-			sock.send(message + "\n")
+		self.send_p2a(self.crashP2a)
 
 		while(1):
-			(active, _, _) = select(self.acc_sockets, [], [])
+			(active, _, _) = select(self.acc_sockets, [], [], self.timeout)
+
+			# Timeout, resend p1a messages
+			if (len(active) == 0):
+				self.wait_for 	 = [i for i in range(n)]
+				self.acc_sockets = []
+
+				self.send_p2a(self.crashP2a)
 
 			for sock in active:
 				# Loop waiting for responses
@@ -348,8 +389,20 @@ class Commander(Thread):
 
 							# Send message to all replicas.
 							for rep_sock in self.rep_sockets:
-								print(":D")
-								rep_sock.send(message + "\n")
+								if ((not self.crashDecision[0]) or (self.crashDecision[0] and i in self.crashDecision[1])):
+									print(":D")
+									rep_sock.send(message + "\n")
+
+							if (self.crashDecision[0]):
+								self.crash()
+
+							for sock in self.acc_sockets:
+								sock.close()
+
+							for sock in self.rep_sockets:
+								sock.close()
+
+							self.lead_sock.close()
 
 							sys.exit()
 					# We received a ballot greater than our leaders.
@@ -359,6 +412,14 @@ class Commander(Thread):
 
 						# Send to leader.
 						self.lead_sock.send(message + "\n")
+
+						for sock in self.acc_sockets:
+							sock.close()
+
+						for sock in self.rep_sockets:
+							sock.close()
+
+						self.lead_sock.close()
 
 						sys.exit()
 
@@ -374,6 +435,35 @@ class Commander(Thread):
 			ret.append(self.tup(sl[i:i+3]))
 
 		return ret
+
+	def send_p2a(self, crashP2a):
+		# Establish connections with all acceptors.
+		for i in range(self.num_acc):
+			sock = socket(AF_INET, SOCK_STREAM)
+			sock.setsockopt(SOL_SOCKET, SO_REUSEADDR, 1)
+
+			try:
+				sock.connect((address, baseport + i*3 + 2))
+
+				self.acc_sockets.append(sock)
+			except:
+				pass
+
+		for i, sock in zip(range(self.num_acc),self.acc_sockets):
+			message = "p2a " + str(self.leader_id) + " " + str(self.pval)
+			print(i, message)
+			# Send message to all acceptors
+
+			if ((not crashP2a[0]) or (crashP2a[0] and i in crashP2a[1])):
+				sock.send(message + "\n")
+
+		if (crashP2a[0]):
+			self.crash()
+
+	def crash(self):
+		# crashes the associated acceptor, replica, and leader
+		crashCmd = "ps aux | grep \"src/server.py {}\" | awk '{{print $2}}' | xargs kill".format(self.leader_id)
+		subprocess.call(crashCmd, shell=True)
 
 
 # Testing
@@ -449,10 +539,11 @@ def main():
 	time.sleep(.1)
 
 	master_sock3.connect((address, 10002))
-	master_sock.send('msg 0 hellothere' + '\n')
-	time.sleep(.1)
-	master_sock.send('msg 3 goodbye' + '\n')
-	# sock.send('propose 0 Goodbye!' + '\n')
+	master_sock.send('msg 0 WhatsYourName' + '\n')
+	#time.sleep(.1)
+	master_sock2.send('msg 1 Alice' + '\n')
+	#time.sleep(.1)
+	master_sock3.send('msg 2 Bob' + '\n')
 
 	while(1):
 		pass
