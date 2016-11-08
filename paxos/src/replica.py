@@ -6,6 +6,7 @@ import time
 from threading import Thread, Lock
 from socket import SOCK_STREAM, socket, AF_INET, SOL_SOCKET, SO_REUSEADDR
 from select import select
+from ast import literal_eval
 
 address = 'localhost'
 baseport = 20000
@@ -47,7 +48,7 @@ class Replica(Thread):
         global n, address
 
         # Connect to the leader socket.
-        self.leader.connect((address, baseport+3*self.index+2))
+        self.leader.connect((address, baseport+3*self.index+1))
 
         # Listen for master connection
         self.my_sock.bind((address, self.my_port))
@@ -63,6 +64,7 @@ class Replica(Thread):
         self.comm_channels = [self.master, self.leader, self.my_sock]
 
         self.send(self.master, "Accepted master connection " + str(self.index))
+        print("Accepted")
 
         while(1):
             (active, _, _) = select(self.comm_channels, [], [])
@@ -84,16 +86,21 @@ class Replica(Thread):
                         if data == '':
                             continue
                         elif data[0] == 'msg':
-                            self.msgList.append(data[1])
-                            self.propose(data[1:])
+                            print(data)
+                            self.msgList.append(int(data[1]))
+                            self.propose((int(data[1]), data[2]))
                         elif data[0] == 'decision':
-                            s = data[1]
-                            p = data[2:]
+                            s = int(data[1])
+                            p = self.tup(data[2:])
+                            print(s, p)
                             self.decisions[s] = p
-                            while (self.slot_num in self.decisions and self.decisions[self.slot_num] != p):
+                            print(self.slot_num)
+                            while (self.slot_num in self.decisions.keys()):
                                 p2 = self.decisions[self.slot_num]
-                                if (self.slot_num in self.proposals and self.proposals[self.slot_num] != p2):
-                                    self.propose(self.proposals[self.slot_num])
+                                all_props = [pval for (slot, pval) in self.proposals.items() if (slot == self.slot_num)]
+                                for prop in all_props:
+                                    if (prop != p2):
+                                        self.propose(prop)
                                 self.perform(p2)
                         elif data[0] == 'get' and data[1] == 'chatLog':
                             self.getChat()
@@ -109,43 +116,52 @@ class Replica(Thread):
             self.send(self.leader, cmd)
 
     def getChat(self):
-        self.send(self.master, ','.join(self.chatLog))
+        self.send(self.master, 'chatLog ' + ','.join(self.chatLog))
 
     def ack(self, msgID, seqID):
         ackMsg = 'ack {} {}'.format(msgID, seqID)
+        self.send(self.master, ackMsg)
+        print(ackMsg)
 
     def propose(self, p):
-        p.prepend(self.master)
         # Propose a clients message to the next available slot.
-        if p not in self.decisions.keys():
+        if p not in self.decisions.values():
+            combined = self.decisions.keys() + self.proposals.keys()
+
+            # First find max slot, then iterate to find next available.
             try:
-                decisionMax = max(sd for sd in self.decisions)
+                smax = max(combined)
             except:
-                decisionMax = 0
-            try:
-                proposalMax = max(sp for sp in self.proposals)
-            except:
-                decisionMax = 0
-            s = max(decisionMax, proposalMax) + 1
+                smax = 1
+
+            s = 1
+            for i in range(1,smax+2):
+                if not i in combined:
+                    print(i)
+                    s = i
+                    break
+
             self.proposals[s] = p
-            propose = 'propose {} '.format(s) + ' '.join(p)
+            propose = 'propose ' + str(s) + ' ' + str(p)
             self.send(self.leader, propose)
 
     def perform(self, p):
         # Basically just send a repsonse back to client
         exists = False
+        print(p)
         for s in self.decisions:
             if (s < self.slot_num) and (self.decisions[s] == p):
                 self.slot_num += 1
                 exists = True
                 break
         if not exists:
-            ret = p[0]
-            cid = p[1]
-            msg = p[2]
+            cid = p[0]
+            msg = p[1]
             self.chatLog.append(msg)
             self.log(msg)
             self.slot_num += 1
+            print(cid)
+            print(self.msgList)
             if cid in self.msgList:
                 self.msgList.remove(cid)
                 # only receiving process sends ack
@@ -162,4 +178,7 @@ class Replica(Thread):
         # crashes the associated acceptor, replica, and leader
         crashCmd = "ps aux | grep \"src/server.py {}\" | awk '{print $2}' | xargs kill".format(self.index)
         subprocess.call(crashCmd)
+
+    def tup(self, sl):
+        return literal_eval(' '.join(sl))
 

@@ -13,7 +13,7 @@ from acceptor import Acceptor
 
 address = 'localhost'
 baseport = 20000
-n = 1
+n = 3
 
 class Leader(Thread):
 	def __init__(self, index, address):
@@ -64,17 +64,19 @@ class Leader(Thread):
 						received = data.strip().split(' ')
 						if (received[0] == "propose"):
 							print(received)
+							print(int(received[1]))
+							print(not (int(received[1]) in self.proposals.keys()))
 							# If we already have a mapping for this slot, ignore.
-							if not int(received[1]) in self.proposals.keys():
-								self.proposals[int(received[1])] = (int(received[1]), received[2])
+							if not (int(received[1]) in self.proposals.keys()):
+								self.proposals[int(received[1])] = (int(received[1]), self.tup(received[2:]))
 								print(self.proposals)
 
-							# If a majority have adopted this ballot number, send out decision messages.
-							if self.active:
-								# Spawn Commander.
-								print(str((self.ballot_num, int(received[1]), received[2])))
-								commander = Commander(self.index, n, (self.ballot_num, int(received[1]), received[2]))
-								commander.start()
+								# If a majority have adopted this ballot number, send out decision messages.
+								if self.active:
+									# Spawn Commander.
+									print(str((self.ballot_num, int(received[1]), self.tup(received[2:]))))
+									commander = Commander(self.index, n, (self.ballot_num, int(received[1]), self.tup(received[2:])))
+									commander.start()
 								
 						elif (received[0] == "adopted"):
 							print(received)
@@ -162,20 +164,12 @@ class Scout(Thread):
 		self.leader_id = lead_id
 		self.num_acc   = n
 		self.b 		   = ballot
+		self.timeout   = .05
 
 		self.wait_for = [i for i in range(n)]
 		self.pvalues  = []
 
 		self.acc_sockets = []
-
-		# Establish connections with all acceptors.
-		for i in range(self.num_acc):
-			sock = socket(AF_INET, SOCK_STREAM)
-			sock.setsockopt(SOL_SOCKET, SO_REUSEADDR, 1)
-
-			sock.connect((address, baseport + i*3 + 2))
-
-			self.acc_sockets.append(sock)
 
 		self.lead_sock = socket(AF_INET, SOCK_STREAM)
 		self.lead_sock.setsockopt(SOL_SOCKET, SO_REUSEADDR, 1)
@@ -183,15 +177,20 @@ class Scout(Thread):
 		self.lead_sock.connect((address, baseport + self.leader_id*3 + 1))
 
 	def run(self):
-		# Send a p1a message to all acceptors.
-		for i, sock in zip(range(self.num_acc),self.acc_sockets):
-			message = "p1a " + str(self.leader_id) + " " + str(self.b)
-			print(message)
-			# Send message to all acceptors
-			sock.send(message + "\n")
+		# Broadast p1a messages.
+		self.send_p1a()
 
 		while(1):
-			(active, _, _) = select(self.acc_sockets, [], [])
+			(active, _, _) = select(self.acc_sockets, [], [], self.timeout)
+
+			# Timeout, resend p1a messages
+			if (len(active) == 0):
+				self.wait_for 	 = [i for i in range(n)]
+				self.pvalues 	 = []
+				self.acc_sockets = []
+
+				self.send_p1a()
+
 
 			for sock in active:
 				# Loop waiting for responses
@@ -202,7 +201,7 @@ class Scout(Thread):
 
 				response = line.strip().split(' ')
 				if (response[0] == "p1b"):
-					print(self.tup(response[2:4]))
+					print(response)
 					if (self.tup(response[2:4]) == self.b):
 						# Add the response to the list of our pvalues.
 						pvals = self.format_pvals(response[4:])
@@ -212,8 +211,10 @@ class Scout(Thread):
 								print(self.pvalues)
 
 						# Update wait_for and terminate if we have received a majority
+						print(int(response[1]))
 						self.wait_for.remove(int(response[1]))
 						if (len(self.wait_for) < self.num_acc/2.0):
+							print("IN ADOPTED")
 							message = "adopted " + str(self.b) + " " + ' '.join([str(pval) for pval in self.pvalues])
 
 							# Send message to leader.
@@ -244,6 +245,27 @@ class Scout(Thread):
 
 		return ret
 
+	def send_p1a(self):
+		# Connect to all available acceptors.
+		for i in range(self.num_acc):
+			sock = socket(AF_INET, SOCK_STREAM)
+			sock.setsockopt(SOL_SOCKET, SO_REUSEADDR, 1)
+
+			try:
+				print("Connecting: " + str(i))
+				sock.connect((address, baseport + i*3 + 2))
+				print("Connected to " + str(i))
+				self.acc_sockets.append(sock)
+			except:
+				pass
+
+		# Send a p1a message to all acceptors.
+		for i, sock in zip(range(self.num_acc),self.acc_sockets):
+			message = "p1a " + str(self.leader_id) + " " + str(self.b)
+			print(message)
+			# Send message to all acceptors
+			sock.send(message + "\n")
+
 
 
 class Commander(Thread):
@@ -265,19 +287,26 @@ class Commander(Thread):
 		for i in range(self.num_acc):
 			sock = socket(AF_INET, SOCK_STREAM)
 			sock.setsockopt(SOL_SOCKET, SO_REUSEADDR, 1)
-			print(i)
-			sock.connect((address, baseport + i*3 + 2))
 
-			self.acc_sockets.append(sock)
+			try:
+				sock.connect((address, baseport + i*3 + 2))
+
+				self.acc_sockets.append(sock)
+			except:
+				pass
+
 
 		# Establish connections with all replicas.
 		for i in range(self.num_acc):
 			sock = socket(AF_INET, SOCK_STREAM)
 			sock.setsockopt(SOL_SOCKET, SO_REUSEADDR, 1)
 
-			sock.connect((address, baseport + i*3 + 0))
+			try:
+				sock.connect((address, baseport + i*3 + 0))
 
-			self.rep_sockets.append(sock)
+				self.rep_sockets.append(sock)
+			except:
+				pass
 
 		# Connect to out leader
 		self.lead_sock = socket(AF_INET, SOCK_STREAM)
@@ -289,7 +318,7 @@ class Commander(Thread):
 		# Send a p2a message to all acceptors.
 		for i, sock in zip(range(self.num_acc),self.acc_sockets):
 			message = "p2a " + str(self.leader_id) + " " + str(self.pval)
-			print(message)
+			print(i, message)
 			# Send message to all acceptors
 			sock.send(message + "\n")
 
@@ -305,16 +334,19 @@ class Commander(Thread):
 
 				response = line.strip().split(' ')
 				if (response[0] == "p2b"):
+					print(response)
 					if (self.tup(response[2:4]) == self.pval[0]):
 						# Update wait_for and terminate if we have received a majority
 						self.wait_for.remove(int(response[1]))
 						if (len(self.wait_for) < self.num_acc/2.0):
-							message = "decision " + str(self.pval[1]) + " " + self.pval[2]
+							print(self.pval)
+							message = "decision " + str(self.pval[1]) + " " + str(self.pval[2])
 							print(message)
 
 							# Send message to all replicas.
-							for acc_sock in self.acc_sockets:
-								acc_sock.send(message + "\n")
+							for rep_sock in self.rep_sockets:
+								print(":D")
+								rep_sock.send(message + "\n")
 
 							sys.exit()
 					# We received a ballot greater than our leaders.
@@ -359,6 +391,12 @@ def main():
 	master_sock = socket(AF_INET, SOCK_STREAM)
 	master_sock.setsockopt(SOL_SOCKET, SO_REUSEADDR, 1)
 
+	master_sock2 = socket(AF_INET, SOCK_STREAM)
+	master_sock2.setsockopt(SOL_SOCKET, SO_REUSEADDR, 1)
+
+	master_sock3 = socket(AF_INET, SOCK_STREAM)
+	master_sock3.setsockopt(SOL_SOCKET, SO_REUSEADDR, 1)
+
 	replica   = Replica(0, 'localhost', 10000)
 	leader    = Leader(0, 'localhost')
 	acceptor  = Acceptor(0, 'localhost')
@@ -371,11 +409,46 @@ def main():
 	replica.start()
 	time.sleep(.1)
 
+	print("FIRST SERVER STARTED")
+
+	master_sock.connect((address, 10000))
+
+	replica   = Replica(1, 'localhost', 10001)
+	leader    = Leader(1, 'localhost')
+	acceptor  = Acceptor(1, 'localhost')
+
+	# Start the acceptor, then leader, then replica.
+	acceptor.start()
+	time.sleep(.1)
+	leader.start()
+	time.sleep(.1)
+	replica.start()
 	time.sleep(.1)
 
-	master_sock.connect((address, baseport + 0 + 0))
+	print("SECOND SERVER STARTED")
+
+	master_sock2.connect((address, 10001))
+
+	replica   = Replica(2, 'localhost', 10002)
+	leader    = Leader(2, 'localhost')
+	acceptor  = Acceptor(2, 'localhost')
+
+	# Start the acceptor, then leader, then replica.
+	acceptor.start()
+	time.sleep(.1)
+	leader.start()
+	time.sleep(.1)
+	replica.start()
+	time.sleep(.1)
+
+	print("ALL SERVERS STARTED")
+
+	time.sleep(.1)
+
+	master_sock3.connect((address, 10002))
 	master_sock.send('msg 0 hellothere' + '\n')
-	# sock.send('propose 1 Hey there baby' + '\n')
+	time.sleep(.1)
+	master_sock.send('msg 3 goodbye' + '\n')
 	# sock.send('propose 0 Goodbye!' + '\n')
 
 	while(1):

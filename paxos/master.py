@@ -40,6 +40,7 @@ class ClientHandler(Thread):
                     continue
                 if s[0] == 'ack':
                     mid = int(s[1])
+                    print(s)
                     ack_lock.acquire()
                     acked_list[mid] = True
                     if mid in wait_for_ack_list:
