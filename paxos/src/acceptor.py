@@ -61,6 +61,7 @@ class Acceptor(Thread):
                         if msg[0] == 'p1a':
                             print(msg)
                             self.p1a(sock, self.tup(msg[2:]))
+
                         elif msg[0] == 'p2a':
                             self.p2a(sock, msg[1:])
                         elif msg[0] == 'crashAfterP1b':
@@ -71,6 +72,7 @@ class Acceptor(Thread):
                         #self.handle_master_comm(sock, data)
 
     def p1a(self, lead, b):
+        print b
         # Send vote for ballot number proposed by leader, if it is highest ballot # received.
         if (self.comp_ballots(b, self.ballot_num) > 0):
             self.ballot_num = b
@@ -92,7 +94,7 @@ class Acceptor(Thread):
         resp = 'p2b {} {}'.format(self.index, self.ballot_num)
         self.send(lead, resp)
 
-        if (self.crashAfterP2b):
+        if self.crashAfterP2b:
             self.crash()
 
     def send(self, sock, s):
@@ -101,7 +103,7 @@ class Acceptor(Thread):
 
     def crash(self):
         # crashes the associated acceptor, replica, and leader
-        crashCmd = "ps aux | grep \"src/server.py {}\" | awk '{print $2}' | xargs kill".format(self.index)
+        crashCmd = "ps aux | grep \"src/server.py {}\" | awk '{{print $2}}' | xargs kill".format(self.index)
         subprocess.call(crashCmd)
 
     def tup(self, sl):

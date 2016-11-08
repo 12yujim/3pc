@@ -162,6 +162,7 @@ def main():
             elif cmd == 'get': # get chatLog
                 while wait_chat_log: # get command blocks next get command
                     time.sleep(0.1)
+                print sp1[1]
                 send(pid, sp1[1], set_wait=True)
 
 if __name__ == '__main__':

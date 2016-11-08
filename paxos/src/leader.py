@@ -109,6 +109,7 @@ class Leader(Thread):
 
 
 						elif (received[0] == "preempted"):
+							print received
 							new_ballot_num = self.tup(received[1:3])
 							# Update our ballot number if a larger one is found.
 							if (self.comp_ballots(new_ballot_num, self.ballot_num) == 1):
@@ -224,6 +225,7 @@ class Scout(Thread):
 							sys.exit()
 					# We received a ballot greater than our leaders.
 					else:
+						print response
 						message = "preempted " + str(self.tup(response[2:4]))
 						print(message)
 
@@ -236,7 +238,8 @@ class Scout(Thread):
 					print line
 
 	def tup(self, sl):
-		return literal_eval(' '.join(sl))
+		print sl
+		return literal_eval(','.join(sl))
 
 	def format_pvals(self, sl):
 		ret = []
