@@ -10,7 +10,7 @@ from ast import literal_eval
 
 address = 'localhost'
 baseport = 20000
-n = 3
+n = 0
 
 class Acceptor(Thread):
     def __init__(self, index, address):
@@ -34,7 +34,7 @@ class Acceptor(Thread):
 
         # Listen for connections from other servers.
         self.my_sock.bind((address, self.my_port))
-        self.my_sock.listen(100*n)
+        self.my_sock.listen(n)
 
         self.comm_channels = [self.my_sock]
 
@@ -63,7 +63,7 @@ class Acceptor(Thread):
                             self.p1a(sock, self.tup(msg[2:]))
 
                         elif msg[0] == 'p2a':
-                            self.p2a(sock, self.tup(msg[2:]))
+                            self.p2a(sock, msg[1:])
                         elif msg[0] == 'crashAfterP1b':
                             self.crashAfterP1b = True
                         elif msg[0] == 'crashAfterP2b':
@@ -88,10 +88,9 @@ class Acceptor(Thread):
     def p2a(self, lead, pval):
         b = pval[1]
         # Decide on this ballot number for the slot, send back an ack to leader.
-        if (self.comp_ballots(b, self.ballot_num) > -1):
+        if (self.ballot_num == None) or (b >= self.ballot_num):
             self.ballot_num = b
-            print(pval)
-            self.accepted.add(pval)
+            self.accepted = self.accepted.add(' '.join(pval))
         resp = 'p2b {} {}'.format(self.index, self.ballot_num)
         self.send(lead, resp)
 
