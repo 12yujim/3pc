@@ -10,7 +10,7 @@ from ast import literal_eval
 
 address = 'localhost'
 baseport = 20000
-n = 3
+n = 4
 
 class Acceptor(Thread):
     def __init__(self, index, address):
@@ -48,7 +48,10 @@ class Acceptor(Thread):
                     self.comm_channels.append(newsock)
                 else:
                     # Are we communicating with master, coord, or other servers?
-                    line = sock.recv(1024)
+                    try:
+                        line = sock.recv(1024)
+                    except:
+                        continue
                     #self.send(self.master, "Got here! " + str(self.index))
                     if not line:
                         self.comm_channels.remove(sock)
@@ -68,8 +71,6 @@ class Acceptor(Thread):
                             self.crashAfterP1b = True
                         elif msg[0] == 'crashAfterP2b':
                             self.crashAfterP2b = True
-                        #self.send(self.master, str(self.index) + ' received from master')
-                        #self.handle_master_comm(sock, data)
 
     def p1a(self, lead, b):
         print b

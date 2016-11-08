@@ -13,7 +13,7 @@ from acceptor import Acceptor
 
 address = 'localhost'
 baseport = 20000
-n = 3
+n = 4
 
 class Leader(Thread):
 	def __init__(self, index, address):
@@ -56,7 +56,10 @@ class Leader(Thread):
 					self.comm_channels.append(newsock)
 				else:
 					# Are we communicating with master, coord, or other servers?
-					line = sock.recv(1024)
+					try:
+						line = sock.recv(1024)
+					except:
+						continue
 					#self.send(self.master, "Got here! " + str(self.index))
 					if not line:
 						self.comm_channels.remove(sock)
@@ -66,6 +69,7 @@ class Leader(Thread):
 							continue
 
 						received = data.strip().split(' ')
+						self.send(sock, "DEBUG, received: " + str(received))
 						if (received[0] == "propose"):
 							print(received)
 							print(int(received[1]))
@@ -191,7 +195,7 @@ class Scout(Thread):
 		self.leader_id = lead_id
 		self.num_acc   = n
 		self.b 		   = ballot
-		self.timeout   = 2
+		self.timeout   = .01
 		self.crashP1a  = crashP1a
 
 		self.wait_for = [i for i in range(n)]
@@ -223,7 +227,10 @@ class Scout(Thread):
 
 			for sock in active:
 				# Loop waiting for responses
-				line = sock.recv(1024)
+				try:
+					line = sock.recv(1024)
+				except:
+					continue
 
 				if not line:
 					self.acc_sockets.remove(sock)
@@ -298,6 +305,7 @@ class Scout(Thread):
 				print("Connected to " + str(i))
 				self.acc_sockets.append(sock)
 			except:
+				print("BIG CONNECTION ERROR")
 				pass
 
 		# Send a p1a message to all acceptors.
@@ -327,7 +335,7 @@ class Commander(Thread):
 
 		self.leader_id = lead_id
 		self.num_acc   = n
-		self.timeout   = 2
+		self.timeout   = .01
 		self.crashP2a  = crashP2a
 		self.crashDecision = crashDecision
 
@@ -371,7 +379,10 @@ class Commander(Thread):
 
 			for sock in active:
 				# Loop waiting for responses
-				line = sock.recv(1024)
+				try:
+					line = sock.recv(1024)
+				except:
+					continue
 
 				if not line:
 					self.acc_sockets.remove(sock)
@@ -447,6 +458,7 @@ class Commander(Thread):
 
 				self.acc_sockets.append(sock)
 			except:
+				print("BIG CONNECTION ERROR2")
 				pass
 
 		for i, sock in zip(range(self.num_acc),self.acc_sockets):
@@ -489,6 +501,9 @@ def main():
 
 	master_sock3 = socket(AF_INET, SOCK_STREAM)
 	master_sock3.setsockopt(SOL_SOCKET, SO_REUSEADDR, 1)
+
+	master_sock4 = socket(AF_INET, SOCK_STREAM)
+	master_sock4.setsockopt(SOL_SOCKET, SO_REUSEADDR, 1)
 
 	replica   = Replica(0, 'localhost', 10000)
 	leader    = Leader(0, 'localhost')
@@ -539,11 +554,28 @@ def main():
 	time.sleep(.1)
 
 	master_sock3.connect((address, 10002))
+
+	replica   = Replica(3, 'localhost', 10003)
+	leader    = Leader(3, 'localhost')
+	acceptor  = Acceptor(3, 'localhost')
+
+	# Start the acceptor, then leader, then replica.
+	acceptor.start()
+	time.sleep(.1)
+	leader.start()
+	time.sleep(.1)
+	replica.start()
+	time.sleep(.1)
+
+
+	master_sock4.connect((address, 10003))
 	master_sock.send('msg 0 WhatsYourName' + '\n')
-	#time.sleep(.1)
+	time.sleep(.1)
 	master_sock2.send('msg 1 Alice' + '\n')
 	#time.sleep(.1)
 	master_sock3.send('msg 2 Bob' + '\n')
+
+	master_sock4.send('msg 3 Carol' + '\n')
 
 	while(1):
 		pass

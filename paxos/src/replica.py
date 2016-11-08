@@ -10,7 +10,7 @@ from ast import literal_eval
 
 address = 'localhost'
 baseport = 20000
-n = 3
+n = 4
 
 class Replica(Thread):
 
@@ -76,16 +76,20 @@ class Replica(Thread):
                     self.comm_channels.append(newsock)
                 else:
                     # Are we communicating with master, coord, or other servers?
-                    line = sock.recv(1024)
+                    try:
+                        line = sock.recv(1024)
+                    except:
+                        continue
                     #self.send(self.master, "Got here! " + str(self.index))
                     if not line:
                         self.comm_channels.remove(sock)
 
                     for unparsed in line.split('\n'):
                         data = unparsed.split(' ')
-                        if data == '':
+                        if data == ['']:
                             continue
                         elif data[0] == 'msg':
+                            self.send(self.master, "Received msg " + str(data))
                             print(data)
                             self.msgList.append(int(data[1]))
                             self.propose((int(data[1]), data[2]))
@@ -106,8 +110,8 @@ class Replica(Thread):
                             self.getChat()
                         elif 'crash' in unparsed:
                             self.handleCrash(data[0])
-                        #self.send(self.master, str(self.index) + ' received from master')
-                        #self.handle_master_comm(sock, data)
+                        else:
+                            self.send(self.master, "DEBUG " + str(data))
 
     def handleCrash(self, cmd):
         if cmd == 'crash':
@@ -141,6 +145,8 @@ class Replica(Thread):
                     print(i)
                     s = i
                     break
+
+            self.send(self.master, "Proposing " + str(s) + ' ' + str(p))
 
             self.proposals[s] = p
             propose = 'propose ' + str(s) + ' ' + str(p)
