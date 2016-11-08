@@ -14,7 +14,7 @@ n = 4
 
 class Replica(Thread):
 
-    def __init__(self, index, address, port):
+    def __init__(self, index, address, port, lock):
         global n, baseport
 
         Thread.__init__(self)
@@ -38,6 +38,7 @@ class Replica(Thread):
         self.msgList = []
         self.chatLogFile = 'rep{}.txt'.format(index)
         self.chatLog = []
+        self.lock = lock
         try:
             with open(self.chatLogFile, 'r') as logfile:
                 self.chatLog = logfile.read().split(',')
@@ -118,11 +119,12 @@ class Replica(Thread):
             self.send(self.leader, cmd)
 
     def getChat(self):
+        print(self.chatLog)
         self.send(self.master, 'chatLog ' + ','.join(self.chatLog))
 
     def ack(self, msgID, seqID):
         ackMsg = 'ack {} {}'.format(msgID, seqID)
-        print(ackMsg)
+        #print(ackMsg)
         self.send(self.master, ackMsg)
 
     def propose(self, p):
@@ -147,6 +149,10 @@ class Replica(Thread):
             self.send(self.leader, propose)
 
     def perform(self, p):
+        with self.lock:
+            # print('performing {}'.format(self.index))
+            # print(p)
+            pass
         # Basically just send a repsonse back to client
         exists = False
 
@@ -158,6 +164,10 @@ class Replica(Thread):
         if not exists:
             cid = p[0]
             msg = p[1]
+            with self.lock:
+                print('performing {}'.format(self.index))
+                print(msg)
+                pass
             self.chatLog.append(msg)
             self.log(msg)
             self.slot_num += 1
@@ -176,7 +186,7 @@ class Replica(Thread):
 
     def crash(self):
         # crashes the associated acceptor, replica, and leader
-        crashCmd = "ps aux | grep \"src/server.py {}\" | awk '{{#print $2}}' | xargs kill".format(self.index)
+        crashCmd = "ps aux | grep \"src/server.py {}\" | awk '{{print $2}}' | xargs kill".format(self.index)
         subprocess.call(crashCmd)
 
     def tup(self, sl):

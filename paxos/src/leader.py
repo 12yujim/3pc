@@ -142,7 +142,7 @@ class Leader(Thread):
 							self.crashDecision = (True, send_to)
 
 						else:
-							print("Unknown input: " + line)
+							#print("Unknown input: " + line)
 							pass
 						
 						#self.send(self.master, str(self.index) + ' received from master')
@@ -238,14 +238,14 @@ class Scout(Thread):
 				if (response[0] == "p1b"):
 					if (self.tup(response[2:4]) == self.b):
 						with self.lock:
-							print("Response")
-							print(response)
+							#print("Response")
+							#print(response)
 							pass
 						# Add the response to the list of our pvalues.
 						pvals = self.format_pvals(response[4:])
 						with self.lock:
-							print("Pvals")
-							print(pvals)
+							#print("Pvals")
+							#print(pvals)
 							pass
 						for pval in pvals:
 							if not pval in self.pvalues:
@@ -286,7 +286,7 @@ class Scout(Thread):
 						sys.exit()
 
 				else:
-					print(line)
+					#print(line)
 					pass
 
 	def tup(self, sl):
@@ -303,7 +303,7 @@ class Scout(Thread):
 		return ret
 
 	def send(self, sock, s):
-		print("Sending " + s)
+		#print("Sending " + s)
 		sock.send(str(s) + '\n')
 
 	def send_p1a(self, crashP1a):
@@ -409,7 +409,10 @@ class Commander(Thread):
 							# Send message to all replicas.
 							for rep_sock in self.rep_sockets:
 								if ((not self.crashDecision[0]) or (self.crashDecision[0] and i in self.crashDecision[1])):
-									print(":D")
+									with self.lock:
+										print(":D")
+										print(message)
+										pass
 									self.send(rep_sock, message)
 
 							if (self.crashDecision[0]):
@@ -515,9 +518,9 @@ def main():
 	master_sock4 = socket(AF_INET, SOCK_STREAM)
 	master_sock4.setsockopt(SOL_SOCKET, SO_REUSEADDR, 1)
 
-	replica   = Replica(0, 'localhost', 10000)
-	leader    = Leader(2, 0, 'localhost', printLock)
-	acceptor  = Acceptor(0, 'localhost')
+	replica   = Replica(0, 'localhost', 10000, printLock)
+	leader    = Leader(3, 0, 'localhost', printLock)
+	acceptor  = Acceptor(0, 'localhost', printLock)
 
 	# Start the acceptor, then leader, then replica.
 	acceptor.start()
@@ -531,9 +534,9 @@ def main():
 
 	master_sock.connect((address, 10000))
 
-	replica   = Replica(1, 'localhost', 10001)
-	leader    = Leader(2, 1, 'localhost', printLock)
-	acceptor  = Acceptor(1, 'localhost')
+	replica   = Replica(1, 'localhost', 10001, printLock)
+	leader    = Leader(3, 1, 'localhost', printLock)
+	acceptor  = Acceptor(1, 'localhost', printLock)
 
 	# Start the acceptor, then leader, then replica.
 	acceptor.start()
@@ -547,9 +550,9 @@ def main():
 
 	master_sock2.connect((address, 10001))
 
-	replica   = Replica(2, 'localhost', 10002)
+	replica   = Replica(2, 'localhost', 10002, printLock)
 	leader    = Leader(3, 2, 'localhost', printLock)
-	acceptor  = Acceptor(2, 'localhost')
+	acceptor  = Acceptor(2, 'localhost', printLock)
 
 	# Start the acceptor, then leader, then replica.
 	acceptor.start()
@@ -567,8 +570,11 @@ def main():
 	master_sock.send('msg 0 WhatsYourName' + '\n')
 	time.sleep(.1)
 	master_sock2.send('msg 1 Alice' + '\n')
-	# time.sleep(.1)
+	time.sleep(.1)
 	master_sock3.send('msg 2 Bob' + '\n')
+
+	time.sleep(2)
+	master_sock.send('get chatLog' + '\n')
 
 	while(1):
 		pass
