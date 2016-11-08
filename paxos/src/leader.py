@@ -16,7 +16,7 @@ baseport = 20000
 n = 0
 
 class Leader(Thread):
-	def __init__(self, total, index, address):
+	def __init__(self, total, index, address, lock):
 		global n, baseport
 
 		Thread.__init__(self)
@@ -30,6 +30,8 @@ class Leader(Thread):
 		self.proposals 	= {}
 		self.active 	= False
 		self.ballot_num = (0, self.index)
+
+		self.lock = lock
 
 		self.crashP1a = (False, [])
 		self.crashP2a = (False, [])
@@ -45,7 +47,7 @@ class Leader(Thread):
 		self.comm_channels = [self.my_sock]
 
 		# Spawn a scout
-		scout = Scout(self.index, n, self.ballot_num, self.crashP1a)
+		scout = Scout(self.index, n, self.ballot_num, self.crashP1a, self.lock)
 		scout.start()
 		while(1):
 			(active, _, _) = select(self.comm_channels, [], [])
@@ -68,28 +70,28 @@ class Leader(Thread):
 
 						received = data.strip().split(' ')
 						if (received[0] == "propose"):
-							print(received)
-							print(int(received[1]))
-							print(not (int(received[1]) in self.proposals.keys()))
+							#print(received)
+							#print(int(received[1]))
+							#print(not (int(received[1]) in self.proposals.keys()))
 							# If we already have a mapping for this slot, ignore.
 							if not (int(received[1]) in self.proposals.keys()):
 								self.proposals[int(received[1])] = (int(received[1]), self.tup(received[2:]))
-								print(self.proposals)
+								#print(self.proposals)
 
 								# If a majority have adopted this ballot number, send out decision messages.
 								if self.active:
 									# Spawn Commander.
-									print(str((self.ballot_num, int(received[1]), self.tup(received[2:]))))
-									commander = Commander(self.index, n, (self.ballot_num, int(received[1]), self.tup(received[2:])), self.crashP2a, self.crashDecision)
+									#print(str((self.ballot_num, int(received[1]), self.tup(received[2:]))))
+									commander = Commander(self.index, n, (self.ballot_num, int(received[1]), self.tup(received[2:])), self.crashP2a, self.crashDecision, self.lock)
 									commander.start()
 								
 						elif (received[0] == "adopted"):
-							print(received)
+							#print(received)
 							# Find the max ballot pval for each slot
 							updated_proposals = {}
-							print received[3:]
+							#print(received[3:])
 							recv_pvals = self.format_pvals(received[3:])
-							print(recv_pvals)
+							#print(recv_pvals)
 							for pval in recv_pvals:
 								updated_proposals[pval[1]] = 0
 							for slot in updated_proposals.keys():
@@ -97,36 +99,38 @@ class Leader(Thread):
 								max_pval  = max(slot_maps, key=itemgetter(0))
 
 								updated_proposals[max_pval[1]] = (max_pval[1], max_pval[2])
-								print(updated_proposals)
+								#print(updated_proposals)
 
 							# Update entries in our proposal table.
 							for slot in updated_proposals.keys():
 								self.proposals[slot] = updated_proposals[slot]
-								print(self.proposals)
+								#print(self.proposals)
 
 							# Spawn commanders for all proposals.
 							for slot in self.proposals:
 								# Spawn commander
-								commander = Commander(self.index, n, (self.ballot_num, slot, self.proposals[slot][1]), self.crashP2a, self.crashDecision)
+								commander = Commander(self.index, n, (self.ballot_num, slot, self.proposals[slot][1]), self.crashP2a, self.crashDecision, self.lock)
 								commander.start()
 
 							self.active = True
 
 
 						elif (received[0] == "preempted"):
-							print received
+							with self.lock:
+								#print(received)
+								pass
 							new_ballot_num = self.tup(received[1:3])
 							# Update our ballot number if a larger one is found.
-							if (self.comp_ballots(new_ballot_num, self.ballot_num) == 1):
+							if (new_ballot_num > self.ballot_num):
 								self.active = False
-								self.ballot_num = (new_ballot_num[0] + 1, self.index)
+								self.ballot_num = ((int(new_ballot_num[0]) + 1), int(self.index))
 
 								# Spawn a scout.
-								scout = Scout(self.index, n, self.ballot_num, self.crashP1a)
+								scout = Scout(self.index, n, self.ballot_num, self.crashP1a, self.lock)
 								scout.start()
 
 						elif (received[0] == "crashP1a"):
-							print("CRASH! " + str(self.index))
+							#print("CRASH! " + str(self.index))
 							send_to = received[1:]
 
 							self.crashP1a = (True, send_to)
@@ -142,7 +146,8 @@ class Leader(Thread):
 							self.crashDecision = (True, send_to)
 
 						else:
-							print "Unknown input: " + line
+							#print("Unknown input: " + line)
+							pass
 						
 						#self.send(self.master, str(self.index) + ' received from master')
 						#self.handle_master_comm(sock, data)
@@ -170,7 +175,7 @@ class Leader(Thread):
 	def format_pvals(self, sl):
 		ret = []
 		for i in range(len(sl)/5):
-			print("MMMMM " + str(sl[5*i:5*i+5]))
+			#print("MMMMM " + str(sl[5*i:5*i+5]))
 			ret.append(self.tup(sl[5*i:5*i+5]))
 
 		return ret
@@ -184,7 +189,7 @@ class Leader(Thread):
 
 
 class Scout(Thread):
-	def __init__(self, lead_id, n, ballot, crashP1a):
+	def __init__(self, lead_id, n, ballot, crashP1a, lock):
 		global address, baseport
 
 		Thread.__init__(self)
@@ -205,9 +210,11 @@ class Scout(Thread):
 
 		self.lead_sock.connect((address, baseport + self.leader_id*3 + 1))
 
+		self.lock = lock
+
 	def run(self):
 		# Broadast p1a messages.
-		print self.crashP1a
+		#print(self.crashP1a)
 		self.send_p1a(self.crashP1a)
 
 		while(1):
@@ -231,26 +238,26 @@ class Scout(Thread):
 
 				response = line.strip().split(' ')
 				if (response[0] == "p1b"):
-					print(response)
+					#print(response)
 					if (self.tup(response[2:4]) == self.b):
 						# Add the response to the list of our pvalues.
 						pvals = self.format_pvals(response[4:])
 						for pval in pvals:
 							if not pval in self.pvalues:
 								self.pvalues.append(pval)
-								print(self.pvalues)
+								#print(self.pvalues)
 
 						# Update wait_for and terminate if we have received a majority
-						print(int(response[1]))
+						#print(int(response[1]))
 						self.wait_for.remove(int(response[1]))
-						print(self.wait_for)
+						#print(self.wait_for)
 						if (len(self.wait_for) < self.num_acc/2.0):
-							print("IN ADOPTED")
+							#print("IN ADOPTED")
 							message = "adopted " + str(self.b) + " " + ' '.join([str(pval) for pval in self.pvalues])
 
 							# Send message to leader.
 							self.lead_sock.send(message + "\n")
-							print(message)
+							#print(message)
 
 							for sock in self.acc_sockets:
 								sock.close()
@@ -260,9 +267,12 @@ class Scout(Thread):
 							sys.exit()
 					# We received a ballot greater than our leaders.
 					else:
-						print response
-						message = "preempted " + str(self.tup(response[2:4]))
-						print(message)
+						with self.lock:
+							#print('???')
+							#print(response)
+							pass
+						message = "preempted " + str((self.tup(response[2:4])))
+						#print(message)
 
 						# Send to leader.
 						self.lead_sock.send(message + "\n")
@@ -275,10 +285,10 @@ class Scout(Thread):
 						sys.exit()
 
 				else:
-					print line
+					#print(line)
+					pass
 
 	def tup(self, sl):
-		print sl
 		return literal_eval(' '.join(sl))
 
 	def format_pvals(self, sl):
@@ -295,9 +305,9 @@ class Scout(Thread):
 			sock.setsockopt(SOL_SOCKET, SO_REUSEADDR, 1)
 
 			try:
-				print("Connecting: " + str(i))
+				#print("Connecting: " + str(i))
 				sock.connect((address, baseport + i*3 + 2))
-				print("Connected to " + str(i))
+				#print("Connected to " + str(i))
 				self.acc_sockets.append(sock)
 			except:
 				pass
@@ -305,7 +315,7 @@ class Scout(Thread):
 		# Send a p1a message to all acceptors.
 		for i, sock in zip(range(self.num_acc),self.acc_sockets):
 			message = "p1a " + str(self.leader_id) + " " + str(self.b)
-			print(message)
+			#print(message)
 			# Send message to all acceptors
 			if ((not crashP1a[0]) or (crashP1a[0] and i in crashP1a[1])):
 				sock.send(message + "\n")
@@ -316,13 +326,12 @@ class Scout(Thread):
 	def crash(self):
 		# crashes the associated acceptor, replica, and leader
 		crashCmd = "ps aux | grep \"src/server.py {}\" | awk '{{print $2}}' | xargs kill".format(self.leader_id)
-		print(crashCmd)
+		#print(crashCmd)
 		subprocess.call(crashCmd, shell=True)
 
 
-
 class Commander(Thread):
-	def __init__(self, lead_id, n, pval, crashP2a, crashDecision):
+	def __init__(self, lead_id, n, pval, crashP2a, crashDecision, lock):
 		global address, baseport
 
 		Thread.__init__(self)
@@ -338,6 +347,8 @@ class Commander(Thread):
 
 		self.acc_sockets = []
 		self.rep_sockets = []
+
+		self.lock = lock
 
 		# Establish connections with all replicas.
 		for i in range(self.num_acc):
@@ -380,19 +391,19 @@ class Commander(Thread):
 
 				response = line.strip().split(' ')
 				if (response[0] == "p2b"):
-					print(response)
+					#print(response)
 					if (self.tup(response[2:4]) == self.pval[0]):
 						# Update wait_for and terminate if we have received a majority
 						self.wait_for.remove(int(response[1]))
 						if (len(self.wait_for) < self.num_acc/2.0):
-							print(self.pval)
+							#print(self.pval)
 							message = "decision " + str(self.pval[1]) + " " + str(self.pval[2])
-							print(message)
+							#print(message)
 
 							# Send message to all replicas.
 							for rep_sock in self.rep_sockets:
 								if ((not self.crashDecision[0]) or (self.crashDecision[0] and i in self.crashDecision[1])):
-									print(":D")
+									#print(":D")
 									rep_sock.send(message + "\n")
 
 							if (self.crashDecision[0]):
@@ -409,8 +420,10 @@ class Commander(Thread):
 							sys.exit()
 					# We received a ballot greater than our leaders.
 					else:
+						#print('??')
+						#print(response)
 						message = "preempted " + str(self.tup(response[2:4]))
-						print(message)
+						#print(message)
 
 						# Send to leader.
 						self.lead_sock.send(message + "\n")
@@ -426,7 +439,8 @@ class Commander(Thread):
 						sys.exit()
 
 				else:
-					print line
+					#print(line)
+					pass
 
 	def tup(self, sl):
 		return literal_eval(' '.join(sl))
@@ -450,10 +464,9 @@ class Commander(Thread):
 				self.acc_sockets.append(sock)
 			except:
 				pass
-
 		for i, sock in zip(range(self.num_acc),self.acc_sockets):
 			message = "p2a " + str(self.leader_id) + " " + str(self.pval)
-			print(i, message)
+			#print(i, message)
 			# Send message to all acceptors
 
 			if ((not crashP2a[0]) or (crashP2a[0] and i in crashP2a[1])):
@@ -466,7 +479,6 @@ class Commander(Thread):
 		# crashes the associated acceptor, replica, and leader
 		crashCmd = "ps aux | grep \"src/server.py {}\" | awk '{{print $2}}' | xargs kill".format(self.leader_id)
 		subprocess.call(crashCmd, shell=True)
-
 
 # Testing
 def main():
@@ -483,6 +495,7 @@ def main():
 	# # Listen for connections, replica
 	# rep_sock.bind((address, baseport + 0 + 0))
 	# rep_sock.listen(4*n)
+	printLock = Lock()
 	master_sock = socket(AF_INET, SOCK_STREAM)
 	master_sock.setsockopt(SOL_SOCKET, SO_REUSEADDR, 1)
 
@@ -493,7 +506,7 @@ def main():
 	master_sock3.setsockopt(SOL_SOCKET, SO_REUSEADDR, 1)
 
 	replica   = Replica(0, 'localhost', 10000)
-	leader    = Leader(0, 'localhost')
+	leader    = Leader(1, 0, 'localhost', printLock)
 	acceptor  = Acceptor(0, 'localhost')
 
 	# Start the acceptor, then leader, then replica.
@@ -504,12 +517,12 @@ def main():
 	replica.start()
 	time.sleep(.1)
 
-	print("FIRST SERVER STARTED")
+	#print("FIRST SERVER STARTED")
 
 	master_sock.connect((address, 10000))
 
 	replica   = Replica(1, 'localhost', 10001)
-	leader    = Leader(1, 'localhost')
+	leader    = Leader(3, 1, 'localhost', printLock)
 	acceptor  = Acceptor(1, 'localhost')
 
 	# Start the acceptor, then leader, then replica.
@@ -520,12 +533,12 @@ def main():
 	replica.start()
 	time.sleep(.1)
 
-	print("SECOND SERVER STARTED")
+	#print("SECOND SERVER STARTED")
 
 	master_sock2.connect((address, 10001))
 
 	replica   = Replica(2, 'localhost', 10002)
-	leader    = Leader(2, 'localhost')
+	leader    = Leader(3, 2, 'localhost', printLock)
 	acceptor  = Acceptor(2, 'localhost')
 
 	# Start the acceptor, then leader, then replica.
@@ -536,15 +549,15 @@ def main():
 	replica.start()
 	time.sleep(.1)
 
-	print("ALL SERVERS STARTED")
+	#print("ALL SERVERS STARTED")
 
 	time.sleep(.1)
 
 	master_sock3.connect((address, 10002))
 	master_sock.send('msg 0 WhatsYourName' + '\n')
-	#time.sleep(.1)
+	time.sleep(.1)
 	master_sock2.send('msg 1 Alice' + '\n')
-	#time.sleep(.1)
+	time.sleep(.1)
 	master_sock3.send('msg 2 Bob' + '\n')
 
 	while(1):
@@ -573,15 +586,15 @@ def main():
 	# 			receive = line.strip().split()
 	# 			if (receive[0] == 'p1a'):
 	# 				message = "p1b 0 " + str((0,0)) + " " + str((0,0,"Hellothere"))
-	# 				print(message)
+	# 				#print(message)
 	# 				sock.send(message + "\n")
 	# 			elif (receive[0] == 'p2a'):
 	# 				message = "p2b 0 " + str((0,0))
-	# 				print(message)
+	# 				#print(message)
 	# 				sock.send(message + "\n")
 	# 			elif (receive[0] == 'decision'):
 	# 				#message = "p1b 0 " + str((1,0)) + " " + str((1,0,"I'mamessage!"))
-	# 				print(receive)
+	# 				#print(receive)
 	# 				#sock.send(message + "\n")
 	# 			else:
 	# 				print "Bad Message"

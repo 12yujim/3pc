@@ -59,7 +59,7 @@ class Acceptor(Thread):
                         # if receive "phase 1a" with ballot num b, go to p1a
                         msg = data.split(' ')
                         if msg[0] == 'p1a':
-                            print(msg)
+                            #print(msg)
                             self.p1a(sock, self.tup(msg[2:]))
 
                         elif msg[0] == 'p2a':
@@ -72,7 +72,6 @@ class Acceptor(Thread):
                         #self.handle_master_comm(sock, data)
 
     def p1a(self, lead, b):
-        print b
         # Send vote for ballot number proposed by leader, if it is highest ballot # received.
         if (self.comp_ballots(b, self.ballot_num) > 0):
             self.ballot_num = b
@@ -86,9 +85,11 @@ class Acceptor(Thread):
             self.crash()
 
     def p2a(self, lead, pval):
-        b = pval[1]
+        pvalTup = self.tup(pval[1:])
+        print(pvalTup)
+        b = pvalTup[0]
         # Decide on this ballot number for the slot, send back an ack to leader.
-        if (self.ballot_num == None) or (b >= self.ballot_num):
+        if (self.comp_ballots(b, self.ballot_num) > -1):
             self.ballot_num = b
             self.accepted = self.accepted.add(' '.join(pval))
         resp = 'p2b {} {}'.format(self.index, self.ballot_num)
@@ -103,11 +104,14 @@ class Acceptor(Thread):
 
     def crash(self):
         # crashes the associated acceptor, replica, and leader
-        crashCmd = "ps aux | grep \"src/server.py {}\" | awk '{{print $2}}' | xargs kill".format(self.index)
+        crashCmd = "ps aux | grep \"src/server.py {}\" | awk '{{#print $2}}' | xargs kill".format(self.index)
         subprocess.call(crashCmd)
 
     def tup(self, sl):
         return literal_eval(' '.join(sl))
+
+    def tup2str(self, t):
+        return '({},{})'.format(t[0], t[1])
 
     def comp_ballots(self, b1, b2):
         if b1 == None:

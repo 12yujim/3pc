@@ -54,7 +54,7 @@ class Replica(Thread):
         self.my_sock.bind((address, self.my_port))
         self.my_sock.listen(100*n)
 
-        print("listening for master")
+        #print("listening for master")
 
         # Listen for master connection
         self.master.bind((address, self.master_port))
@@ -63,7 +63,7 @@ class Replica(Thread):
 
         self.comm_channels = [self.master, self.leader, self.my_sock]
 
-        print("Accepted")
+        #print("Accepted")
 
         while(1):
 
@@ -87,15 +87,15 @@ class Replica(Thread):
                         if data == '':
                             continue
                         elif data[0] == 'msg':
-                            print(data)
+                            #print(data)
                             self.msgList.append(int(data[1]))
                             self.propose((int(data[1]), data[2]))
                         elif data[0] == 'decision':
                             s = int(data[1])
                             p = self.tup(data[2:])
-                            print(s, p)
+                            #print(s, p)
                             self.decisions[s] = p
-                            print(self.slot_num)
+                            #print(self.slot_num)
                             while (self.slot_num in self.decisions.keys()):
                                 p2 = self.decisions[self.slot_num]
                                 all_props = [pval for (slot, pval) in self.proposals.items() if (slot == self.slot_num)]
@@ -114,7 +114,7 @@ class Replica(Thread):
         if cmd == 'crash':
             self.crash()
         else:
-            print("Sending CRASH to leader " + str(self.index))
+            #print("Sending CRASH to leader " + str(self.index))
             self.send(self.leader, cmd)
 
     def getChat(self):
@@ -123,7 +123,7 @@ class Replica(Thread):
     def ack(self, msgID, seqID):
         ackMsg = 'ack {} {}'.format(msgID, seqID)
         self.send(self.master, ackMsg)
-        print(ackMsg)
+        #print(ackMsg)
 
     def propose(self, p):
         # Propose a clients message to the next available slot.
@@ -139,7 +139,7 @@ class Replica(Thread):
             s = 1
             for i in range(1,smax+2):
                 if not i in combined:
-                    print(i)
+                    #print(i)
                     s = i
                     break
 
@@ -151,7 +151,7 @@ class Replica(Thread):
     def perform(self, p):
         # Basically just send a repsonse back to client
         exists = False
-        print(p)
+        #print(p)
         for s in self.decisions:
             if (s < self.slot_num) and (self.decisions[s] == p):
                 self.slot_num += 1
@@ -163,8 +163,8 @@ class Replica(Thread):
             self.chatLog.append(msg)
             self.log(msg)
             self.slot_num += 1
-            print(cid)
-            print(self.msgList)
+            #print(cid)
+            #print(self.msgList)
             if cid in self.msgList:
                 self.msgList.remove(cid)
                 # only receiving process sends ack
@@ -179,7 +179,7 @@ class Replica(Thread):
 
     def crash(self):
         # crashes the associated acceptor, replica, and leader
-        crashCmd = "ps aux | grep \"src/server.py {}\" | awk '{{print $2}}' | xargs kill".format(self.index)
+        crashCmd = "ps aux | grep \"src/server.py {}\" | awk '{{#print $2}}' | xargs kill".format(self.index)
         subprocess.call(crashCmd)
 
     def tup(self, sl):
