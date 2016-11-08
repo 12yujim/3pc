@@ -10,7 +10,7 @@ from ast import literal_eval
 
 address = 'localhost'
 baseport = 20000
-n = 0
+n = 3
 
 class Replica(Thread):
 
@@ -52,7 +52,7 @@ class Replica(Thread):
 
         # Listen for master connection
         self.my_sock.bind((address, self.my_port))
-        self.my_sock.listen(n)
+        self.my_sock.listen(100*n)
 
         print("listening for master")
 
@@ -63,7 +63,6 @@ class Replica(Thread):
 
         self.comm_channels = [self.master, self.leader, self.my_sock]
 
-        self.send(self.master, "Accepted master connection " + str(self.index))
         print("Accepted")
 
         while(1):
@@ -107,7 +106,7 @@ class Replica(Thread):
                         elif data[0] == 'get' and data[1] == 'chatLog':
                             self.getChat()
                         elif 'crash' in unparsed:
-                            self.handleCrash(data)
+                            self.handleCrash(data[0])
                         #self.send(self.master, str(self.index) + ' received from master')
                         #self.handle_master_comm(sock, data)
 
@@ -115,6 +114,7 @@ class Replica(Thread):
         if cmd == 'crash':
             self.crash()
         else:
+            print("Sending CRASH to leader " + str(self.index))
             self.send(self.leader, cmd)
 
     def getChat(self):
