@@ -14,7 +14,7 @@ n = 0
 
 class Replica(Thread):
 
-    def __init__(self, total, index, address, port, lock):
+    def __init__(self, total, index, address, port):
         global n, baseport
 
         Thread.__init__(self)
@@ -38,7 +38,6 @@ class Replica(Thread):
 
         self.msgList = []
         self.chatLog = []
-        self.lock = lock
 
     def run(self):
         global n, address
@@ -50,16 +49,12 @@ class Replica(Thread):
         self.my_sock.bind((address, self.my_port))
         self.my_sock.listen(100*n)
 
-        #print("listening for master")
-
         # Listen for master connection
         self.master.bind((address, self.master_port))
         self.master.listen(5)
         (self.master, _) = self.master.accept()
 
         self.comm_channels = [self.master, self.leader, self.my_sock]
-
-        #print("Accepted")
 
         while(1):
 
@@ -120,12 +115,10 @@ class Replica(Thread):
             self.send(self.leader, cmd)
 
     def getChat(self):
-        #print(self.chatLog)
         self.send(self.master, 'chatLog ' + ','.join(self.chatLog))
 
     def ack(self, msgID, seqID):
         ackMsg = 'ack {} {}'.format(msgID, seqID)
-        #print(ackMsg)
         self.send(self.master, ackMsg)
 
     def propose(self, p):
@@ -150,10 +143,6 @@ class Replica(Thread):
             self.send(self.leader, propose)
 
     def perform(self, p):
-        with self.lock:
-            # print('performing {}'.format(self.index))
-            # print(p)
-            pass
         # Basically just send a repsonse back to client
         exists = False
 
@@ -165,10 +154,6 @@ class Replica(Thread):
         if not exists:
             cid = p[0]
             msg = p[1]
-            with self.lock:
-                #print('performing {}'.format(self.index))
-                #print(msg)
-                pass
             self.chatLog.append(msg)
             self.slot_num += 1
 

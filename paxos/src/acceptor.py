@@ -13,7 +13,7 @@ baseport = 20000
 n = 0
 
 class Acceptor(Thread):
-    def __init__(self, total, index, address, lock):
+    def __init__(self, total, index, address):
         global n, baseport
 
         Thread.__init__(self)
@@ -29,8 +29,6 @@ class Acceptor(Thread):
 
         self.crashAfterP1b = False
         self.crashAfterP2b = False
-
-        self.printLock = lock
 
     def run(self):
         global n, address
@@ -64,7 +62,6 @@ class Acceptor(Thread):
                             continue
                         # if receive "phase 1a" with ballot num b, go to p1a
                         msg = data.split(' ')
-                        #print(msg)
                         if msg[0] == 'p1a':
                             self.p1a(sock, self.tup(msg[2:]))
 
@@ -97,9 +94,6 @@ class Acceptor(Thread):
             self.ballot_num = b
 
             self.accepted.add(str(pvalTup))
-            with self.printLock:
-                #print(pvalTup)
-                pass
         resp = 'p2b {} {}'.format(self.index, self.ballot_num)
         self.send(lead, resp)
 
@@ -107,7 +101,6 @@ class Acceptor(Thread):
             self.crash()
 
     def send(self, sock, s):
-        #print("Acceptor " + s)
         sock.send(str(s) + '\n')
 
 
