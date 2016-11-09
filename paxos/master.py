@@ -57,7 +57,7 @@ class ClientHandler(Thread):
                     print chatLog
                     wait_chat_log = False
                 else:
-                    print 'WRONG MESSAGE:', s
+                    print 'WRONG MESSAGE:', ' '.join(s)
             else:
                 try:
                     data = self.sock.recv(1024)

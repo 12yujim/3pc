@@ -37,14 +37,8 @@ class Replica(Thread):
         self.decisions = {}
 
         self.msgList = []
-        self.chatLogFile = 'rep{}.txt'.format(index)
         self.chatLog = []
         self.lock = lock
-        try:
-            with open(self.chatLogFile, 'r') as logfile:
-                self.chatLog = logfile.read().split(',')
-        except:
-            pass
 
     def run(self):
         global n, address
@@ -176,7 +170,6 @@ class Replica(Thread):
                 #print(msg)
                 pass
             self.chatLog.append(msg)
-            self.log(msg)
             self.slot_num += 1
 
             if cid in self.msgList:
@@ -184,18 +177,12 @@ class Replica(Thread):
                 # only receiving process sends ack
                 self.ack(cid, len(self.chatLog))
 
-    def log(self, chat):
-        with open(self.chatLogFile, 'a') as logfile:
-            logfile.write(chat)
-
     def send(self, sock, s):
         sock.send(str(s) + '\n')
 
     def crash(self):
-        self.send(self.master, 'noooo RIP me')
         # crashes the associated acceptor, replica, and leader
-        crashCmd = "ps aux | grep \"src/server.py {}\" | awk '{{print $2}}' | xargs kill".format(self.index)
-        subprocess.call(crashCmd)
+        sys.exit(0)
 
     def tup(self, sl):
         return literal_eval(' '.join(sl))
