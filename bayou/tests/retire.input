@@ -1,0 +1,15 @@
+0 startServer 10013
+1 startServer 10014
+2 startServer 10015
+3 startServer 10016
+4 startClient 10017
+0 createConn 1 2 3
+0 breakConn 1 2 3
+2 createConn 1
+4 add song1 url1 2
+2 retire
+1 createConn 3
+3 createConn 0
+0 createConn 1
+1 printLog
+exit

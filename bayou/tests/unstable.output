@@ -1,0 +1,2 @@
+log {'count':1, 'log':'CREATE:(*):TRUE,CREATE:(*):TRUE,CREATE:(*):TRUE'}
+log {'count':2, 'log':'CREATE:(*):TRUE,CREATE:(*):TRUE,CREATE:(*):TRUE,PUT:(song1,url1):FALSE'}
