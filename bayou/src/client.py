@@ -56,7 +56,7 @@ class Client(Thread):
 						line = sock.recv(1024)
 					except:
 						continue
-					self.send(self.master, "Got here! " + str(self.index))
+
 					if line == '':
 						self.comm_channels.remove(sock)
 
@@ -77,12 +77,12 @@ class Client(Thread):
 							# Just pass this request on to the server with the current version number.
 							connect_sock = socket(AF_INET, SOCK_STREAM)
 							connect_sock.setsockopt(SOL_SOCKET, SO_REUSEADDR, 1)
+							self.comm_channels.append(connect_sock)
 
 							connect_sock.connect((address, server_baseport+int(received[3])))
 
 							self.send(connect_sock, ' '.join(received[:3]) + ' ' + str(self.VN[songName]))
 
-							connect_sock.close()
 
 						elif (received[0] == "delete"):
 							songName = received[1]
@@ -96,12 +96,13 @@ class Client(Thread):
 							# Just pass this request on to the server.
 							connect_sock = socket(AF_INET, SOCK_STREAM)
 							connect_sock.setsockopt(SOL_SOCKET, SO_REUSEADDR, 1)
+							self.comm_channels.append(connect_sock)
 
 							connect_sock.connect((address, server_baseport+int(received[2])))
 
 							self.send(connect_sock, ' '.join(received[:2])  + ' ' + str(self.VN[songName]))
 
-							connect_sock.close()
+
 
 						elif (received[0] == "get"):
 							songName = received[1]
@@ -109,16 +110,21 @@ class Client(Thread):
 							# Just pass this request on to the server.
 							connect_sock = socket(AF_INET, SOCK_STREAM)
 							connect_sock.setsockopt(SOL_SOCKET, SO_REUSEADDR, 1)
+							self.comm_channels.append(connect_sock)
 
 							connect_sock.connect((address, server_baseport+int(received[2])))
 
 							self.send(connect_sock, ' '.join(received[:2]) + ' ' + str(self.VN[songName]))
 
-							connect_sock.close()
 
 						elif (received[0] == "VNupdate"):
 							# Update our VC with the most recent version at a server.
+							self.send(self.master, "VN update " + str(self.index))
 							self.VN[received[1]] = int(received[2])
+
+						elif (received[0] == "getResp"):
+							# Simply pass the reponse to the master
+							self.send(self.master, ' '.join(received))
 
 						else:
 							self.send(self.master, "Invalid command " + str(self.index))

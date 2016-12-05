@@ -99,13 +99,53 @@ class Server(Thread):
 							self.database[songName] = (self.LC, URL)
 							self.tentative_log.append((self.LC, ' '.join(received[:3])))
 
+							# Send the updated VN if we used our LC
+							if self.LC != VN:
+								self.send(sock, 'VNupdate ' + songName + ' ' + str(self.LC))
+								self.comm_channels.remove(sock)
+								sock.close()
+
+
 								
 						elif (received[0] == "delete"):
 							self.send(self.master, "Got delete command " + str(self.index))
+							songName = received[1]
+							VN = int(received[2])
+
+							# Apply the add/modify to our database and write it to the log tentatively.
+							self.LC = max(self.LC + 1, VN)
+
+							self.database[songName] = (self.LC, URL)
+							self.tentative_log.append((self.LC, ' '.join(received[:2])))
+
+							# Send the updated VN if we used our LC
+							if self.LC != VN:
+								self.send(sock, 'VNupdate ' + songName + ' ' + str(self.LC))
+								self.comm_channels.remove(sock)
+								sock.close()
 
 
 						elif (received[0] == "get"):
 							self.send(self.master, "Got get command " + str(self.index))
+							songName = received[1]
+							VN = int(received[2])
+							response = 'getResp '
+
+							# If we don't have the key logged, return ERR_KEY
+							if not songName in self.database:
+								response += '<' + songName + ':ERR_KEY>'
+							else:
+								entry = self.database[songName]
+								# If we don't have the most recent version of an entry, return ERR_DEP.
+								if VN != entry[0]:
+									response += '<' + songName + ':ERR_DEP>'
+								else:
+									response += '<' + songName + ':' + entry[1] + '>'
+
+							# Send the response back to the client.
+							self.send(sock, response)
+							self.comm_channels.remove(sock)
+							sock.close()
 
 
 						elif (received[0] == "createConn"):
@@ -229,8 +269,6 @@ class Server(Thread):
 			return ["RETIRE", m[1]]
 
 		
-		
->>>>>>> 5df8f04d40c02a3d80ecf5c637ff86d6be9ad202
 
 def main():
 	global address
