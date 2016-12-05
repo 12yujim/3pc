@@ -279,13 +279,18 @@ class Server(Thread):
 	def commit_writes(self):
 		self.send(self.master, "Commiting writes... " + str(self.index))
 		# Iterate through the tentative write log and commit anything without dependent writes elsewhere.
-		for entry in self.tentative_log:
+		i = 0
+		while i < len(self.tentative_log):
+			entry = self.tentative_log[i]
 			# Commit every entry with a accept time lower than the lowest in VC.
 			if (entry[0] <= min(self.VC.values())):
 				self.tentative_log.remove(entry)
 				self.commited_log.append((self.CSN, entry[0], entry[1]))
 				self.CSN += 1
 				self.send(self.master, "Committed write " + str(self.CSN) + ' ' + str(entry[0]) + ' ' + entry[1])
+			else:
+				# changed to handle removing elements within for loop
+				i += 1
 
 
 	# anti-entropy protocol for S to R
