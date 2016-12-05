@@ -205,7 +205,7 @@ class Server(Thread):
 								self.name = received[1]
 								self.LC   = int(received[1][1:received[1].index(',')]) + 1
 								self.VC[received[2]] = self.LC - 1
-								self.send(self.master, "Adding new name " + str(self.index))
+								self.send(self.master, "Adding new name " + received[2] + ' ' + str(self.index))
 
 								# For now just add the write to our tentative log (server should update us)
 								self.tentative_log.append((self.LC - 1, ' '.join(received[:2])))
@@ -337,6 +337,7 @@ class Server(Thread):
 			for w in self.tentative_log:
 				wAcceptT = int(w[0])
 				if self.name in rV and rV[self.name] < wAcceptT:
+					self.send(self.master, "sent tentative")
 					self.send(sock, 'TENTATIVE ' + repr(w))
 					time.sleep(0.1)
 
