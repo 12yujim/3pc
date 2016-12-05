@@ -105,7 +105,45 @@ class Server(Thread):
 
 	def send(self, sock, s):
 		sock.send(str(s) + '\n')
-		
+
+	# anti-entropy protocol for S to R
+	# after sending initiate message, compare logs and send updates
+	# should be run similar to a heartbeat function
+	# TODO: interruptions during anti-entropy? can create anti-entropy receive function that ignores all commands outside anti-entropy
+	def anti_entropyS(self, sock, data=None):
+		if not data:
+			# initiate anti-entropy
+			self.send(sock, 'anti-entropy')
+		else:
+			# have received response from R
+			rV, rCSN = data  # TODO: figure out how data is transferred, assume works for now
+			if self.OSN > rCSN:
+				# rollback DB to self.O
+				self.rollback()
+				self.send(sock, ' '.join([self.db, self.o, self.OSN]) + '\n') # TODO: data transfer protocol (what should R expect to receive)
+			if rCSN < self.CSN:
+				unknownCommits = rCSN + 1 # we assume CSN points to most recent (see TODO below)
+				while unknownCommits < self.CSN:
+					w = self.writelog[unknownCommits]
+					# TODO: should self.CSN point to most recent, or next spot (and therefore not indexed in writelog)
+					# TODO 2: depending on how writes are ordered our message to R can simply be w
+					wCSN = w[0]
+					wAcceptT = w[1]
+					wRepID = w[2]
+					if int(wAcceptT) <= rV[wRepID]:
+						# do we need to include R in the commit? 
+						self.send(sock, 'COMMIT ' + ' '.join([wCSN, wAcceptT, wRepID]) + '\n')
+					else:
+						self.send(sock, w + '\n')
+					unknownCommits += 1
+				tentative = unknownCommits
+				while tentative < len(self.writelog):
+					w = self.writelog[tentative]
+					wAcceptT = w[1]
+					wRepID = w[2]
+					if rV[wRepID] < wAcceptT:
+						self.send(sock, w + '\n')
+					tentative += 1
 
 def main():
 	global address
