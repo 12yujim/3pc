@@ -25,6 +25,9 @@ class Client(Thread):
 		self.master = socket(AF_INET, SOCK_STREAM)
 		self.master.setsockopt(SOL_SOCKET, SO_REUSEADDR, 1)
 
+		# Each client maintains its own key version (VN), incrementing everytime it performs an operation on a certain key.
+		self.VN = {}	# Format is (songName, verion_num)
+
 		# Listen for connections
 		self.my_sock.bind((address, self.my_port))
 		self.my_sock.listen(10000)
@@ -63,26 +66,59 @@ class Client(Thread):
 
 						received = data.strip().split(' ')
 						if (received[0] == "add"):
-							# Just pass this request on to the server.
+							songName = received[1]
+
+							# Parse the request and update our value version vector.
+							if songName in self.VN:
+								self.VN[songName] += 1
+							else:
+								self.VN[songName] = 1
+
+							# Just pass this request on to the server with the current version number.
 							connect_sock = socket(AF_INET, SOCK_STREAM)
 							connect_sock.setsockopt(SOL_SOCKET, SO_REUSEADDR, 1)
 
 							connect_sock.connect((address, server_baseport+int(received[3])))
 
-							self.send(connect_sock, ' '.join(received[:2]))
+							self.send(connect_sock, ' '.join(received[:3]) + ' ' + str(self.VN[songName]))
 
 							connect_sock.close()
 
-						elif ((received[0] == "delete") or (received[0] == "get")):
+						elif (received[0] == "delete"):
+							songName = received[1]
+
+							# Parse the request and update our value version vector.
+							if songName in self.VN:
+								self.VN[songName] += 1
+							else:
+								self.VN[songName] = 1
+
 							# Just pass this request on to the server.
 							connect_sock = socket(AF_INET, SOCK_STREAM)
 							connect_sock.setsockopt(SOL_SOCKET, SO_REUSEADDR, 1)
 
 							connect_sock.connect((address, server_baseport+int(received[2])))
 
-							self.send(connect_sock, ' '.join(received[:1]))
+							self.send(connect_sock, ' '.join(received[:2])  + ' ' + str(self.VN[songName]))
 
 							connect_sock.close()
+
+						elif (received[0] == "get"):
+							songName = received[1]
+
+							# Just pass this request on to the server.
+							connect_sock = socket(AF_INET, SOCK_STREAM)
+							connect_sock.setsockopt(SOL_SOCKET, SO_REUSEADDR, 1)
+
+							connect_sock.connect((address, server_baseport+int(received[2])))
+
+							self.send(connect_sock, ' '.join(received[:2]) + ' ' + str(self.VN[songName]))
+
+							connect_sock.close()
+
+						elif (received[0] == "VNupdate"):
+							# Update our VC with the most recent version at a server.
+							self.VN[received[1]] = int(received[2])
 
 						else:
 							self.send(self.master, "Invalid command " + str(self.index))

@@ -10,6 +10,8 @@ from select import select
 address = 'localhost'
 baseport = 25000
 
+# Next LC value is max(LC+1, client's version). Also update the client's VC!
+
 class Server(Thread):
 	def __init__(self, index, master_port):
 		global baseport
@@ -18,13 +20,28 @@ class Server(Thread):
 		self.index   = index
 		self.my_port = baseport + self.index
 
-		self.server_socks = []
+		self.server_socks  = []		# Current list of sockets we are connected to.
+		self.VC = []				# Vector clock for every server with the most recent accept-order.
+		self.tentative_log = [] 	# Format is (accept_timestamp, write_info)
+		self.commited_log  = []		# Format is (CSN, accept_timestamp, write_info)
+		self.database = {}			# Holds (songName, (version_num, URL)) pairs determined by applying writes.
+
+		self.LC  = 0				# Keeps track of our most recent accept-order.
+		self.CSN = 0				# Keeps track of the current commit sequence number.
+		self.primary = False
+		self.name = ''
+
+		if (self.index == 0):
+			self.primary = True
+			self.name = ("BD")
+
 
 		self.my_sock = socket(AF_INET, SOCK_STREAM)
 		self.my_sock.setsockopt(SOL_SOCKET, SO_REUSEADDR, 1)
 
 		self.master = socket(AF_INET, SOCK_STREAM)
 		self.master.setsockopt(SOL_SOCKET, SO_REUSEADDR, 1)
+
 
 		# Listen for connections
 		self.my_sock.bind((address, self.my_port))
@@ -45,10 +62,15 @@ class Server(Thread):
 			(active, _, _) = select(self.comm_channels, [], [])
 
 			for sock in active:
-				
 				if (sock == self.my_sock):
 					(newsock, _) = self.my_sock.accept()
 					self.comm_channels.append(newsock)
+
+					# Send a create message if we don't have a name.
+					if (self.name == ''):
+						self.server_socks.append(newsock)
+						self.send(newsock, "create " + str(self.index))
+
 				else:
 					# Are we communicating with master, clients, or other servers?
 					try:
@@ -57,6 +79,7 @@ class Server(Thread):
 						continue
 					
 					if line == '':
+						self.send(self.master, "Socket closed " + str(self.index))
 						self.comm_channels.remove(sock)
 
 					for data in line.split('\n'):
@@ -65,40 +88,85 @@ class Server(Thread):
 
 						received = data.strip().split(' ')
 						if (received[0] == "add"):
-							self.send(self.master, "Got add command " + str(self.index))
+							self.send(self.master, "Got add command " + ' '.join(received))
+							songName = received[1]
+							URL = received[2]
+							VN  = int(received[3])
+
+							# Apply the add/modify to our database and write it to the log tentatively.
+							self.LC = max(self.LC + 1, VN)
+
+							self.database[songName] = (self.LC, URL)
+							self.tentative_log.append((self.LC, ' '.join(received[:3])))
+
 								
 						elif (received[0] == "delete"):
 							self.send(self.master, "Got delete command " + str(self.index))
 
+
 						elif (received[0] == "get"):
 							self.send(self.master, "Got get command " + str(self.index))
+
 
 						elif (received[0] == "createConn"):
 							# Connect to all servers listed
 							for i in received[1:]:
 								connect_sock = socket(AF_INET, SOCK_STREAM)
 								connect_sock.setsockopt(SOL_SOCKET, SO_REUSEADDR, 1)
+
+								self.server_socks.append((int(i), connect_sock))
+								self.comm_channels.append(connect_sock)
 								
 								connect_sock.connect((address, baseport+int(i)))
-								self.server_socks.append((int(i), connect_sock))
 
-								# Add a created entry in our log.
+								# Send a create message to the server if we don't have a name.
+								if (self.name == None):
+									self.send(connect_sock, "create " + str(self.index))
+								
 
 						elif (received[0] == "breakConn"):
 							# Close all connections listed
 							for i in received[1:]:
-								for (ID, sock) in self.server_socks:
+								for (ID, sock1) in self.server_socks:
 									if ID == int(i):
-										self.server_socks.remove((ID, sock))
-										sock.close()
+										self.server_socks.remove((ID, sock1))
+										self.comm_channels.remove(sock1)
+										sock1.close()
+
+
+						elif (received[0] == "create"):
+							if (self.name == ''):
+								# Record our new name and set our LC
+								self.name = received[1]
+								self.LC   = int(received[1][1:received[1].index(',')]) + 1
+							else:
+								# Add this entry to our log and respond with the new server's name.
+								new_name = "<" + str(self.LC) + "," + self.name + ">"
+								self.tentative_log.append((self.LC, "create " + new_name))
+
+								self.LC += 1
+
+								self.send(sock, "create " + new_name)
 
 
 						elif (received[0] == "retire"):
 							pass
 
 						elif (received[0] == "printLog"):
-							pass
+							out = 'log '
 
+							# Record those stable writes in the commit log.
+							for entry in self.commited_log:
+								# Parse the write_info
+								info = self.parse_info(entry[2])
+								out += '<' + info[0] + ':(' + info[1] + '):TRUE>'
+							# Record those tentative writes in the log.
+							for entry in self.tentative_log:
+								# Parse the write info
+								info = self.parse_info(entry[1])
+								out += '<' + info[0] + ':(' + info[1] + '):FALSE>'
+
+							self.send(sock, out)
 
 						else:
 							self.send(self.master, "Invalid command " + str(self.index))
@@ -144,6 +212,25 @@ class Server(Thread):
 					if rV[wRepID] < wAcceptT:
 						self.send(sock, w + '\n')
 					tentative += 1
+
+	# Apply all writes in the log to our database/VC logs.
+	def process_writes(self):
+		pass
+
+	def parse_info(self, s):
+		m = s.split(' ')
+		if (m[0] == "add"):
+			return ["PUT", m[1] + ',' + m[2]]
+		elif (m[0] == "delete"):
+			return ["DELETE", m[1]]
+		elif (m[0] == "create"):
+			return ["CREATE", m[1]]
+		elif (m[0] == "retire"):
+			return ["RETIRE", m[1]]
+
+		
+		
+>>>>>>> 5df8f04d40c02a3d80ecf5c637ff86d6be9ad202
 
 def main():
 	global address
