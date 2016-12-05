@@ -1,6 +1,6 @@
 # Server class file
 
-import sys, os
+import sys, os, random
 import subprocess
 import time
 import random
@@ -79,7 +79,8 @@ class Server(Thread):
 		self.comm_channels = [self.my_sock, self.master, self.heartbeat]
 
 		while(1):
-			(active, _, _) = select(self.comm_channels, [], [])
+			# timeout every 3 seconds for heartbeat
+			(active, _, _) = select(self.comm_channels, [], [], 3)
 
 			for sock in active:
 				if (sock == self.my_sock):
@@ -89,6 +90,7 @@ class Server(Thread):
 					# Send a create message if we don't have a name.
 					if (self.name == ''):
 						print "Sending create " + str(self.index)
+
 						self.send(newsock, "create " + str(self.index))
 
 				else:
@@ -273,12 +275,20 @@ class Server(Thread):
 								pass
 
 						elif (received[0] == 'BEGIN'):
+							#self.send(self.master, "entering anti-entropy")
 							self.anti_entropyS(sock, received[1:])
 
 						elif (received[0] == "COMMIT"):
 							# Could be data commit or already in our logs. Remove from tent and add to commit.
 							w = (received[1], received[2], received[3])
-							self.commited_log.append(w)
+							i = 0
+							while i < len(self.commited_log):
+								currW = self.commited_log[i]
+								if currW[0] > w[0]:
+									break
+								i += 1
+							self.commited_log.insert(i, w)
+							# TODO: should this be incremented?
 							self.CSN += 1
 
 						elif (received[0] == "TENTATIVE"):
@@ -375,11 +385,12 @@ class Server(Thread):
 		# Iterate through the tentative write log and commit anything without dependent writes elsewhere.
 		for entry in self.tentative_log:
 			# Commit every entry with a accept time lower than the lowest in VC.
-			if (entry[0] <= min(self.VC.values())):
+			if self.VC.values() and (entry[0] <= min(self.VC.values())):
 				self.tentative_log.remove(entry)
 				self.commited_log.append((self.CSN, entry[0], entry[1], entry[2]))
 				self.CSN += 1
 				self.send(self.master, "Committed write " + str(self.CSN) + ' ' + str(entry[0]) + ' ' + entry[1] + ' ' + entry[2])
+
 
 
 	# anti-entropy protocol for S to R
@@ -420,6 +431,7 @@ class Server(Thread):
 				if rV[wRepID] < wAcceptT:
 					print "Seding tentative " + repr(w) + ' ' + self.name + ' ' + str(self.index)
 					self.send(sock, 'TENTATIVE ' + repr(w))
+
 
 	# Apply all writes in the log to our database/VC logs.
 	def process_writes(self):

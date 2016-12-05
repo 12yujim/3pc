@@ -114,7 +114,10 @@ class Client(Thread):
 
 							connect_sock.connect((address, server_baseport+int(received[2])))
 
-							self.send(connect_sock, ' '.join(received[:2]) + ' ' + str(self.VN[songName]))
+							if songName in self.VN:
+								self.send(connect_sock, ' '.join(received[:2]) + ' ' + str(self.VN[songName]))
+							else:
+								self.send(self.master, "song not in client VN")
 
 
 						elif (received[0] == "VNupdate"):
