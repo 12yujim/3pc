@@ -13,7 +13,7 @@ address = 'localhost'
 threads = {}
 wait_resp = False
 
-debug = False
+debug = True
 
 class ClientHandler(Thread):
     def __init__(self, index, address, port):

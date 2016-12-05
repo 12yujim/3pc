@@ -8,17 +8,19 @@ from socket import SOCK_STREAM, socket, AF_INET, SOL_SOCKET, SO_REUSEADDR
 from select import select
 
 address = 'localhost'
-baseport = 25000
+baseport = 23000
+heartbeat_baseport = 26000
 
 # Next LC value is max(LC+1, client's version). Also update the client's VC!
 
 class Server(Thread):
 	def __init__(self, index, master_port):
-		global baseport
+		global baseport, heartbeat_baseport
 
 		Thread.__init__(self)
 		self.index   = index
 		self.my_port = baseport + self.index
+		self.heartbeat_port = heartbeat_baseport + self.index
 
 		self.server_socks   = []	# Current list of sockets we are connected to.
 		self.VC = {}				# Vector clock for every server with the most recent accept-order, format (server_name, accept_num)
@@ -43,10 +45,21 @@ class Server(Thread):
 		self.master = socket(AF_INET, SOCK_STREAM)
 		self.master.setsockopt(SOL_SOCKET, SO_REUSEADDR, 1)
 
+		self.heartbeat = socket(AF_INET, SOCK_STREAM)
+		self.heartbeat.setsockopt(SOL_SOCKET, SO_REUSEADDR, 1)
 
 		# Listen for connections
 		self.my_sock.bind((address, self.my_port))
 		self.my_sock.listen(10000)
+
+		# Listen for heartbeat connection and spawn thread.
+		timeout_thread = Thread(target = anti_entropy_heartbeat, args = [self.heartbeat_port])
+		timeout_thread.daemon = True
+		timeout_thread.start()
+
+		self.heartbeat.bind((address, self.heartbeat_port))
+		self.heartbeat.listen(5)
+		(self.heartbeat, _) = self.heartbeat.accept()
 
 		# Listen for master connection
 		self.master.bind((address, master_port))
@@ -57,7 +70,7 @@ class Server(Thread):
 	def run(self):
 		global baseport, address
 
-		self.comm_channels = [self.my_sock, self.master]
+		self.comm_channels = [self.my_sock, self.master, self.heartbeat]
 
 		while(1):
 			(active, _, _) = select(self.comm_channels, [], [])
@@ -230,6 +243,9 @@ class Server(Thread):
 
 							self.send(sock, out)
 
+						elif (received[0] == "anti-entropy"):
+							#self.send(self.master, "Got anti-entropy " + str(self.index))
+
 						else:
 							self.send(self.master, "Invalid command " + str(self.index))
 
@@ -255,40 +271,40 @@ class Server(Thread):
 	# after sending initiate message, compare logs and send updates
 	# should be run similar to a heartbeat function
 	# TODO: interruptions during anti-entropy? can create anti-entropy receive function that ignores all commands outside anti-entropy
-	def anti_entropyS(self, sock, data=None):
-		if not data:
-			# initiate anti-entropy
-			self.send(sock, 'anti-entropy')
-		else:
-			# have received response from R
-			rV, rCSN = data  # TODO: figure out how data is transferred, assume works for now
-			if self.OSN > rCSN:
-				# rollback DB to self.O
-				self.rollback()
-				self.send(sock, ' '.join([self.db, self.o, self.OSN]) + '\n') # TODO: data transfer protocol (what should R expect to receive)
-			if rCSN < self.CSN:
-				unknownCommits = rCSN + 1 # we assume CSN points to most recent (see TODO below)
-				while unknownCommits < self.CSN:
-					w = self.writelog[unknownCommits]
-					# TODO: should self.CSN point to most recent, or next spot (and therefore not indexed in writelog)
-					# TODO 2: depending on how writes are ordered our message to R can simply be w
-					wCSN = w[0]
-					wAcceptT = w[1]
-					wRepID = w[2]
-					if int(wAcceptT) <= rV[wRepID]:
-						# do we need to include R in the commit? 
-						self.send(sock, 'COMMIT ' + ' '.join([wCSN, wAcceptT, wRepID]) + '\n')
-					else:
-						self.send(sock, w + '\n')
-					unknownCommits += 1
-				tentative = unknownCommits
-				while tentative < len(self.writelog):
-					w = self.writelog[tentative]
-					wAcceptT = w[1]
-					wRepID = w[2]
-					if rV[wRepID] < wAcceptT:
-						self.send(sock, w + '\n')
-					tentative += 1
+	# def anti_entropyS(self, sock, data=None):
+	# 	if not data:
+	# 		# initiate anti-entropy
+	# 		self.send(sock, 'anti-entropy')
+	# 	else:
+	# 		# have received response from R
+	# 		rV, rCSN = data  # TODO: figure out how data is transferred, assume works for now
+	# 		if self.OSN > rCSN:
+	# 			# rollback DB to self.O
+	# 			self.rollback()
+	# 			self.send(sock, ' '.join([self.db, self.o, self.OSN]) + '\n') # TODO: data transfer protocol (what should R expect to receive)
+	# 		if rCSN < self.CSN:
+	# 			unknownCommits = rCSN + 1 # we assume CSN points to most recent (see TODO below)
+	# 			while unknownCommits < self.CSN:
+	# 				w = self.writelog[unknownCommits]
+	# 				# TODO: should self.CSN point to most recent, or next spot (and therefore not indexed in writelog)
+	# 				# TODO 2: depending on how writes are ordered our message to R can simply be w
+	# 				wCSN = w[0]
+	# 				wAcceptT = w[1]
+	# 				wRepID = w[2]
+	# 				if int(wAcceptT) <= rV[wRepID]:
+	# 					# do we need to include R in the commit? 
+	# 					self.send(sock, 'COMMIT ' + ' '.join([wCSN, wAcceptT, wRepID]) + '\n')
+	# 				else:
+	# 					self.send(sock, w + '\n')
+	# 				unknownCommits += 1
+	# 			tentative = unknownCommits
+	# 			while tentative < len(self.writelog):
+	# 				w = self.writelog[tentative]
+	# 				wAcceptT = w[1]
+	# 				wRepID = w[2]
+	# 				if rV[wRepID] < wAcceptT:
+	# 					self.send(sock, w + '\n')
+	# 				tentative += 1
 
 	# Apply all writes in the log to our database/VC logs.
 	def process_writes(self):
@@ -305,7 +321,20 @@ class Server(Thread):
 		elif (m[0] == "retire"):
 			return ["RETIRE", m[1]]
 
-		
+
+def anti_entropy_heartbeat(port):
+	# Create a connection between this thread and the server.
+	time.sleep(.1)
+	connection = socket(AF_INET, SOCK_STREAM)
+	connection.setsockopt(SOL_SOCKET, SO_REUSEADDR, 1)
+
+	connection.connect((address, port))
+
+	while(True):
+		# Sleep for .1 second intervals and send a initiate message to all servers.
+		time.sleep(1)
+		connection.send("anti-entropy\n")
+
 
 def main():
 	global address
@@ -316,7 +345,7 @@ def main():
 
 	server = Server(index, port)
 
-	# Start the acceptor, then leader, then replica.
+	# Start the server.
 	server.start()
 
 	sys.exit(0)

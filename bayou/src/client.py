@@ -141,7 +141,7 @@ def main():
 
 	client = Client(index, port)
 
-	# Start the acceptor, then leader, then replica.
+	# Start the client.
 	client.start()
 
 	sys.exit(0)
