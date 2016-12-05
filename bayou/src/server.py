@@ -73,7 +73,8 @@ class Server(Thread):
 		self.comm_channels = [self.my_sock, self.master, self.heartbeat]
 
 		while(1):
-			(active, _, _) = select(self.comm_channels, [], [])
+			# timeout every 3 seconds for heartbeat
+			(active, _, _) = select(self.comm_channels, [], [], 3)
 
 			for sock in active:
 				if (sock == self.my_sock):
@@ -158,6 +159,7 @@ class Server(Thread):
 							else:
 								entry = self.database[songName]
 								# If we don't have the most recent version of an entry, return ERR_DEP.
+								# TODO: should this check < rather than inequality?
 								if VN != entry[0]:
 									response += '<' + songName + ':ERR_DEP>'
 								else:
@@ -229,6 +231,7 @@ class Server(Thread):
 
 						elif (received[0] == "anti-entropy"):
 							# send CSN and VC (flipped order for simplicity)
+							# self.send(self.master, "Got anti-entropy " + str(self.index))
 							startmsg = 'BEGIN ' + str(self.CSN) + ' ' + str(self.VC)
 							self.send(sock, startmsg)
 
@@ -263,10 +266,6 @@ class Server(Thread):
 
 							self.send(sock, out)
 
-						elif (received[0] == "anti-entropy"):
-							pass
-							#self.send(self.master, "Got anti-entropy " + str(self.index))
-
 						else:
 							self.send(self.master, "Invalid command " + str(self.index))
 
@@ -297,37 +296,33 @@ class Server(Thread):
 	# after sending initiate message, compare logs and send updates
 	# should be run similar to a heartbeat function
 	# TODO: interruptions during anti-entropy? can create anti-entropy receive function that ignores all commands outside anti-entropy
-	def anti_entropyS(self, sock, data=None):
-		if not data:
-			# initiate anti-entropy
-			self.send(sock, 'anti-entropy')
-		else:
-			# have received response from R
-			rCSN = int(data[0])  # TODO: figure out how data is transferred, assume works for now
-			rV = eval(' '.join(data[1:]))
-			if self.OSN > rCSN:
-				# rollback DB to self.O
-				self.rollback()
-				self.send(sock, ' '.join([self.db, self.o, self.OSN])) # TODO: data transfer protocol (what should R expect to receive)
-			if rCSN < self.CSN:
-				unknownCommits = rCSN # we assume CSN points to most recent (see TODO below)
-				while unknownCommits < self.CSN:
-					w = self.commited_log[unknownCommits]
-					# TODO: should self.CSN point to most recent, or next spot (and therefore not indexed in writelog)
-					# TODO 2: depending on how writes are ordered our message to R can simply be w
-					wCSN = w[0]
-					wAcceptT = w[1]
-					wRepID = w[2]
-					if wRepID in rV and int(wAcceptT) <= rV[wRepID]:
-						# do we need to include R in the commit? 
-						self.send(sock, 'COMMIT ' + ' '.join([wCSN, wAcceptT, wRepID]))
-					else:
-						self.send(sock, w + '\n')
-				for w in self.tentative_log:
-					wAcceptT = w[1]
-					wRepID = w[2]
-					if rV[wRepID] < wAcceptT:
-						self.send(sock, 'TENTATIVE ' + repr(w))
+	def anti_entropyS(self, sock, data):
+		# have received response from R
+		rCSN = int(data[0])  # TODO: figure out how data is transferred, assume works for now
+		rV = eval(' '.join(data[1:]))
+		if self.OSN > rCSN:
+			# rollback DB to self.O
+			self.rollback()
+			self.send(sock, ' '.join([self.db, self.o, self.OSN])) # TODO: data transfer protocol (what should R expect to receive)
+		if rCSN < self.CSN:
+			unknownCommits = rCSN # we assume CSN points to most recent (see TODO below)
+			while unknownCommits < self.CSN:
+				w = self.commited_log[unknownCommits]
+				# TODO: should self.CSN point to most recent, or next spot (and therefore not indexed in writelog)
+				# TODO 2: depending on how writes are ordered our message to R can simply be w
+				wCSN = w[0]
+				wAcceptT = w[1]
+				wRepID = w[2]
+				if wRepID in rV and int(wAcceptT) <= rV[wRepID]:
+					# do we need to include R in the commit? 
+					self.send(sock, 'COMMIT ' + ' '.join([wCSN, wAcceptT, wRepID]))
+				else:
+					self.send(sock, w + '\n')
+			for w in self.tentative_log:
+				wAcceptT = w[1]
+				wRepID = w[2]
+				if rV[wRepID] < wAcceptT:
+					self.send(sock, 'TENTATIVE ' + repr(w))
 
 	# Apply all writes in the log to our database/VC logs.
 	def process_writes(self):
