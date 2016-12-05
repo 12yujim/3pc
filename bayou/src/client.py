@@ -9,7 +9,7 @@ from select import select
 
 address = 'localhost'
 baseport = 20000
-server_baseport = 25000
+server_baseport = 23000
 
 class Client(Thread):
 	def __init__(self, index, master_port):
