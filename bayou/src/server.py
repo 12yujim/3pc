@@ -20,11 +20,12 @@ class Server(Thread):
 		self.index   = index
 		self.my_port = baseport + self.index
 
-		self.server_socks  = []		# Current list of sockets we are connected to.
-		self.VC = []				# Vector clock for every server with the most recent accept-order.
-		self.tentative_log = [] 	# Format is (accept_timestamp, write_info)
-		self.commited_log  = []		# Format is (CSN, accept_timestamp, write_info)
+		self.server_socks   = []	# Current list of sockets we are connected to.
+		self.VC = {}				# Vector clock for every server with the most recent accept-order, format (server_name, accept_num)
+		self.tentative_log  = [] 	# Format is (accept_timestamp, write_info)
+		self.commited_log   = []	# Format is (CSN, accept_timestamp, write_info)
 		self.database = {}			# Holds (songName, (version_num, URL)) pairs determined by applying writes.
+		self.version_commit = {}	# Holds the latest version commited for every key in storage.
 
 		self.LC  = 0				# Keeps track of our most recent accept-order.
 		self.CSN = 0				# Keeps track of the current commit sequence number.
@@ -97,7 +98,7 @@ class Server(Thread):
 							self.LC = max(self.LC + 1, VN)
 
 							self.database[songName] = (self.LC, URL)
-							self.tentative_log.append((self.LC, ' '.join(received[:3])))
+							self.tentative_log.append((self.LC, ' '.join(received[:3]) + ' ' + self.name))
 
 							# Send the updated VN if we used our LC
 							if self.LC != VN:
@@ -105,8 +106,11 @@ class Server(Thread):
 								self.comm_channels.remove(sock)
 								sock.close()
 
+							# Try to commit if we are the primary.
+							if (self.primary):
+								self.commit_writes()
 
-								
+
 						elif (received[0] == "delete"):
 							self.send(self.master, "Got delete command " + str(self.index))
 							songName = received[1]
@@ -116,13 +120,17 @@ class Server(Thread):
 							self.LC = max(self.LC + 1, VN)
 
 							self.database[songName] = (self.LC, URL)
-							self.tentative_log.append((self.LC, ' '.join(received[:2])))
+							self.tentative_log.append((self.LC, ' '.join(received[:2]) + ' ' + self.name))
 
 							# Send the updated VN if we used our LC
 							if self.LC != VN:
 								self.send(sock, 'VNupdate ' + songName + ' ' + str(self.LC))
 								self.comm_channels.remove(sock)
 								sock.close()
+
+							# Try to commit if we are the primary.
+							if (self.primary):
+								self.commit_writes()
 
 
 						elif (received[0] == "get"):
@@ -176,17 +184,31 @@ class Server(Thread):
 
 						elif (received[0] == "create"):
 							if (self.name == ''):
-								# Record our new name and set our LC
+								# Record our new name and set our LC, also create an entry in our VC table for ID.
+								# TODO: The responding server should actually bring us up to date with its logs.
 								self.name = received[1]
 								self.LC   = int(received[1][1:received[1].index(',')]) + 1
+								self.VC[received[2]] = self.LC - 1
+								self.send(self.master, "Adding new name " + str(self.index))
+
+								# For now just add the write to our tentative log (server should update us)
+								self.tentative_log.append((self.LC - 1, ' '.join(received[:2])))
 							else:
 								# Add this entry to our log and respond with the new server's name.
 								new_name = "<" + str(self.LC) + "," + self.name + ">"
 								self.tentative_log.append((self.LC, "create " + new_name))
 
+								# Initialize a VC entry for this server.
+								self.VC[new_name] = self.LC
 								self.LC += 1
 
-								self.send(sock, "create " + new_name)
+								self.send(self.master, "Creating new name " + str(self.index))
+
+								self.send(sock, "create " + new_name + ' ' + self.name)
+
+								# Try to commit if we are the primary.
+								if (self.primary):
+									self.commit_writes()
 
 
 						elif (received[0] == "retire"):
@@ -233,6 +255,21 @@ class Server(Thread):
 
 	def send(self, sock, s):
 		sock.send(str(s) + '\n')
+
+
+	# Commit writes, deletes, creates, and retirements. This function is run after each of these operations and after
+	# anti-entropy. Writes may or may not be commited based on if we have the writes casually preceding them. (Primary only)
+	def commit_writes(self):
+		self.send(self.master, "Commiting writes... " + str(self.index))
+		# Iterate through the tentative write log and commit anything without dependent writes elsewhere.
+		for entry in self.tentative_log:
+			# Commit every entry with a accept time lower than the lowest in VC.
+			if (entry[0] <= min(self.VC.values())):
+				self.tentative_log.remove(entry)
+				self.commited_log.append((self.CSN, entry[0], entry[1]))
+				self.CSN += 1
+				self.send(self.master, "Committed write " + str(self.CSN) + ' ' + str(entry[0]) + ' ' + entry[1])
+
 
 	# anti-entropy protocol for S to R
 	# after sending initiate message, compare logs and send updates
