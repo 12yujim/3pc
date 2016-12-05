@@ -296,7 +296,7 @@ class Server(Thread):
 					wCSN = w[0]
 					wAcceptT = w[1]
 					wRepID = w[2]
-					if int(wAcceptT) <= rV[wRepID]:
+					if wRepID in rV and int(wAcceptT) <= rV[wRepID]:
 						# do we need to include R in the commit? 
 						self.send(sock, 'COMMIT ' + ' '.join([wCSN, wAcceptT, wRepID]))
 					else:
