@@ -1,6 +1,6 @@
 # Server class file
 
-import sys, os
+import sys, os, random
 import subprocess
 import time
 from threading import Thread, Lock
@@ -83,7 +83,8 @@ class Server(Thread):
 
 					# Send a create message if we don't have a name.
 					if (self.name == ''):
-						self.server_socks.append(newsock)
+						# TODO: what ID should be associated with this socket
+						self.server_socks.append((-1, newsock))
 						self.send(newsock, "create " + str(self.index))
 
 				else:
@@ -232,15 +233,27 @@ class Server(Thread):
 						elif (received[0] == "anti-entropy"):
 							# send CSN and VC (flipped order for simplicity)
 							# self.send(self.master, "Got anti-entropy " + str(self.index))
-							startmsg = 'BEGIN ' + str(self.CSN) + ' ' + str(self.VC)
-							self.send(sock, startmsg)
+							# do nothing if no connected servers
+							if self.server_socks:
+								entropySock = self.server_socks[random.randint(0, (len(self.server_socks) - 1))][1]
+								#self.send(self.master, entropySock)
+								startmsg = 'BEGIN ' + str(self.CSN) + ' ' + str(self.VC)
+								self.send(entropySock, startmsg)
 
 						elif (received[0] == 'BEGIN'):
+							#self.send(self.master, "entering anti-entropy")
 							self.anti_entropyS(sock, received[1:])
 
 						elif (received[0] == "COMMIT"):
 							w = (received[1], received[2], received[3])
-							self.commited_log.append(w)
+							i = 0
+							while i < len(self.commited_log):
+								currW = self.commited_log[i]
+								if currW[0] > w[0]:
+									break
+								i += 1
+							self.commited_log.insert(i, w)
+							# TODO: should this be incremented?
 							self.CSN += 1
 
 						elif (received[0] == "TENTATIVE"):
@@ -282,7 +295,7 @@ class Server(Thread):
 		while i < len(self.tentative_log):
 			entry = self.tentative_log[i]
 			# Commit every entry with a accept time lower than the lowest in VC.
-			if (entry[0] <= min(self.VC.values())):
+			if self.VC.values() and (entry[0] <= min(self.VC.values())):
 				self.tentative_log.remove(entry)
 				self.commited_log.append((self.CSN, entry[0], entry[1]))
 				self.CSN += 1
@@ -300,29 +313,32 @@ class Server(Thread):
 		# have received response from R
 		rCSN = int(data[0])  # TODO: figure out how data is transferred, assume works for now
 		rV = eval(' '.join(data[1:]))
-		if self.OSN > rCSN:
-			# rollback DB to self.O
-			self.rollback()
-			self.send(sock, ' '.join([self.db, self.o, self.OSN])) # TODO: data transfer protocol (what should R expect to receive)
+		# if self.OSN > rCSN:
+		# 	# rollback DB to self.O
+		# 	self.rollback()
+		# 	self.send(sock, ' '.join([self.db, self.o, self.OSN])) # TODO: data transfer protocol (what should R expect to receive)
 		if rCSN < self.CSN:
 			unknownCommits = rCSN # we assume CSN points to most recent (see TODO below)
 			while unknownCommits < self.CSN:
 				w = self.commited_log[unknownCommits]
 				# TODO: should self.CSN point to most recent, or next spot (and therefore not indexed in writelog)
 				# TODO 2: depending on how writes are ordered our message to R can simply be w
-				wCSN = w[0]
-				wAcceptT = w[1]
-				wRepID = w[2]
-				if wRepID in rV and int(wAcceptT) <= rV[wRepID]:
-					# do we need to include R in the commit? 
-					self.send(sock, 'COMMIT ' + ' '.join([wCSN, wAcceptT, wRepID]))
-				else:
-					self.send(sock, w + '\n')
+				# wCSN = w[0]
+				# wAcceptT = w[1]
+				# write_info = w[2]
+				# if self.name in rV and int(wAcceptT) <= rV[self.name]:
+				# 	# do we need to include R in the commit? 
+				# 	self.send(sock, 'COMMIT ' + ' '.join([wCSN, wAcceptT, write_info]))
+				# else:
+				# 	self.send(sock, 'COMMIT ' + repr(w))
+				self.send(sock, 'COMMIT ' + repr(w))
+				unknownCommits += 1
+				time.sleep(0.1)
 			for w in self.tentative_log:
-				wAcceptT = w[1]
-				wRepID = w[2]
-				if rV[wRepID] < wAcceptT:
+				wAcceptT = int(w[0])
+				if self.name in rV and rV[self.name] < wAcceptT:
 					self.send(sock, 'TENTATIVE ' + repr(w))
+					time.sleep(0.1)
 
 	# Apply all writes in the log to our database/VC logs.
 	def process_writes(self):
