@@ -171,7 +171,7 @@ class Server(Thread):
 							response = 'getResp '
 
 							# If we don't have the key logged, return ERR_KEY
-							if VN != self.VN[songName]:
+							if songName in self.VN and VN != self.VN[songName]:
 								response += '<' + songName + ':ERR_DEP>'
 							else:
 								if not songName in self.database:
@@ -435,7 +435,15 @@ class Server(Thread):
 
 	# Apply all writes in the log to our database/VC logs.
 	def process_writes(self):
-		pass
+		for _, _, write_info in self.tentative_log:
+			m = write_info.split(' ')
+			if (m[0] == "add"):
+				self.database[m[1]] = m[2]
+			elif (m[0] == "delete"):
+				try:
+					del self.database[m1]
+				except:
+					pass
 
 	def parse_info(self, s):
 		m = s.split(' ')
