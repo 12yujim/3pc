@@ -208,6 +208,7 @@ class Server(Thread):
 									self.server_socks.append((int(i), connect_sock))
 
 									self.send(connect_sock, "create " + str(self.index))
+									time.sleep(0.1)
 								
 
 						elif (received[0] == "breakConn"):
@@ -297,7 +298,7 @@ class Server(Thread):
 
 						elif (received[0] == "COMMIT"):
 							# Could be data commit or already in our logs. Remove from tent and add to commit.
-							#self.send(self.master, "COMMIT " + data.strip())
+							#self.send(self.master, data.strip())
 							w = eval(' '.join(received[1:]))
 							i = 0
 							while i < len(self.commited_log):
@@ -349,6 +350,7 @@ class Server(Thread):
 								out += '<' + info[0] + ':(' + info[1] + '):FALSE>'
 
 							self.send(sock, out)
+							#self.send(self.master, "testCommitLog " + str(self.commited_log))
 
 						else:
 							self.send(self.master, "Invalid command " + str(self.index))
@@ -410,13 +412,18 @@ class Server(Thread):
 	def commit_writes(self):
 		self.send(self.master, "Commiting writes... " + str(self.index))
 		# Iterate through the tentative write log and commit anything without dependent writes elsewhere.
-		for entry in self.tentative_log:
+		i = 0
+		while i < len(self.tentative_log):
+			# use i to avoid list removal errors in python
+			entry = self.tentative_log[i]
 			# Commit every entry with a accept time lower than the lowest in VC.
 			if self.commit_VC.values() and (entry[0] <= min(self.commit_VC.values())):
-				self.tentative_log.remove(entry)
+				self.tentative_log.pop(i)
 				self.commited_log.append((self.CSN, entry[0], entry[1], entry[2]))
 				self.CSN += 1
 				self.send(self.master, "Committed write " + str(self.CSN) + ' ' + str(entry[0]) + ' ' + entry[1] + ' ' + entry[2])
+			else:
+				i += 1
 
 
 
@@ -431,12 +438,12 @@ class Server(Thread):
 			# have received response from R
 			rCSN = int(data[0])
 			rV = eval(' '.join(data[1:]))
-			# if rCSN < self.CSN:
-			# 	unknownCommits = rCSN # we assume CSN points to most recent (see TODO below)
-			# 	while unknownCommits < self.CSN:
-			# 		w = self.commited_log[unknownCommits]
-			# 		self.send(sock, 'COMMIT ' + repr(w))
-			# 	unknownCommits += 1
+			if rCSN < self.CSN:
+				unknownCommits = rCSN # we assume CSN points to most recent (see TODO below)
+				while unknownCommits < self.CSN:
+					w = self.commited_log[unknownCommits]
+					self.send(sock, 'COMMIT ' + repr(w))
+					unknownCommits += 1
 			# Send all tentative writes.
 			for w in self.tentative_log:
 				wAcceptT = int(w[0])
