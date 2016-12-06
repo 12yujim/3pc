@@ -451,7 +451,7 @@ class Server(Thread):
 			# Send all tentative writes.
 			for w in self.tentative_log:
 				wAcceptT = int(w[0])
-				wRepID = int(w[1])
+				wRepID = w[1]
 
 				#print wRepID + ' ' + self.name + ' ' + str(rV)
 				if wRepID not in rV or rV[wRepID] < wAcceptT:
