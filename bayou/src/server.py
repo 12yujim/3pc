@@ -50,6 +50,7 @@ class Server(Thread):
 
 		self.my_sock = socket(AF_INET, SOCK_STREAM)
 		self.my_sock.setsockopt(SOL_SOCKET, SO_REUSEADDR, 1)
+		self.my_sock.settimeout(1)
 
 		self.master = socket(AF_INET, SOCK_STREAM)
 		self.master.setsockopt(SOL_SOCKET, SO_REUSEADDR, 1)
@@ -88,6 +89,7 @@ class Server(Thread):
 			for sock in active:
 				if (sock == self.my_sock):
 					(newsock, port) = self.my_sock.accept()
+					print('added new socket')
 					self.comm_channels.append(newsock)
 
 					# Send a create message if we don't have a name.
@@ -174,7 +176,9 @@ class Server(Thread):
 							response = 'getResp '
 
 							# If we don't have the key logged, return ERR_KEY
-							if songName in self.VN and VN != self.VN[songName]:
+							# only ERR_DEP if received VN is greater than our VN
+							if songName in self.VN and VN > self.VN[songName]:
+								self.send(self.master, "VN: {} VN[songName]: {}".format(VN, self.VN[songName]))
 								response += '<' + songName + ':ERR_DEP>'
 							else:
 								if not songName in self.database:
@@ -295,7 +299,8 @@ class Server(Thread):
 
 						elif (received[0] == "COMMIT"):
 							# Could be data commit or already in our logs. Remove from tent and add to commit.
-							w = (received[1], received[2], received[3])
+							#self.send(self.master, data.strip())
+							w = eval(' '.join(received[1:]))
 							i = 0
 							while i < len(self.commited_log):
 								currW = self.commited_log[i]
@@ -330,6 +335,9 @@ class Server(Thread):
 							if (self.primary):
 								self.commit_writes()
 
+						elif (received[0] == "RETIRE"):
+							self.primary = True
+
 
 						elif (received[0] == "printLog"):
 							out = 'log '
@@ -346,12 +354,15 @@ class Server(Thread):
 								out += '<' + info[0] + ':(' + info[1] + '):FALSE>'
 
 							self.send(sock, out)
+							#self.send(self.master, "testCommitLog " + str(self.commited_log))
 
 						else:
 							self.send(self.master, "Invalid command " + str(self.index))
 
 	def send(self, sock, s):
 		sock.send(str(s) + '\n')
+		# sleep to avoid message overload
+		time.sleep(0.1)
 
 
 	def insert_tentative(self, new_entry):
@@ -405,20 +416,24 @@ class Server(Thread):
 	def commit_writes(self):
 		self.send(self.master, "Commiting writes... " + str(self.index))
 		# Iterate through the tentative write log and commit anything without dependent writes elsewhere.
-		for entry in self.tentative_log:
+		i = 0
+		while i < len(self.tentative_log):
+			# use i to avoid list removal errors in python
+			entry = self.tentative_log[i]
 			# Commit every entry with a accept time lower than the lowest in VC.
 			if self.commit_VC.values() and (entry[0] <= min(self.commit_VC.values())):
-				self.tentative_log.remove(entry)
+				self.tentative_log.pop(i)
 				self.commited_log.append((self.CSN, entry[0], entry[1], entry[2]))
 				self.CSN += 1
 				self.send(self.master, "Committed write " + str(self.CSN) + ' ' + str(entry[0]) + ' ' + entry[1] + ' ' + entry[2])
+			else:
+				i += 1
 
 
 
 	# anti-entropy protocol for S to R
 	# after sending initiate message, compare logs and send updates
 	# should be run similar to a heartbeat function
-	# TODO: interruptions during anti-entropy? can create anti-entropy receive function that ignores all commands outside anti-entropy
 	def anti_entropyS(self, sock, data=None):
 		if not data:
 			# initiate anti-entropy
@@ -427,35 +442,23 @@ class Server(Thread):
 			# have received response from R
 			rCSN = int(data[0])
 			rV = eval(' '.join(data[1:]))
-			# if self.OSN > rCSN:
-			# 	# rollback DB to self.O
-			# 	self.rollback()
-			# 	self.send(sock, ' '.join([self.db, self.o, self.OSN])) # TODO: data transfer protocol (what should R expect to receive)
-			# if rCSN < self.CSN:
-			# 	unknownCommits = rCSN # we assume CSN points to most recent (see TODO below)
-			# 	while unknownCommits < self.CSN:
-			# 		w = self.commited_log[unknownCommits]
-			# 		# TODO: should self.CSN point to most recent, or next spot (and therefore not indexed in writelog)
-			# 		# TODO 2: depending on how writes are ordered our message to R can simply be w
-			# 		wCSN = int(w[0])
-			# 		wAcceptT = int(w[1])
-			# 		wRepID = w[2]
-			# 		if wRepID in rV and int(wAcceptT) <= rV[wRepID]:
-			# 			# do we need to include R in the commit? 
-			# 			self.send(sock, 'COMMIT ' + ' '.join([wCSN, wAcceptT, wRepID]))
-			# 		else:
-			# 			self.send(sock, w)
-			#	unknownCommits += 1
+			if rCSN < self.CSN:
+				unknownCommits = rCSN # we assume CSN points to most recent (see TODO below)
+				while unknownCommits < self.CSN:
+					w = self.commited_log[unknownCommits]
+					self.send(sock, 'COMMIT ' + repr(w))
+					unknownCommits += 1
 			# Send all tentative writes.
 			for w in self.tentative_log:
 				wAcceptT = int(w[0])
-				wRepID = w[1]
+				wRepID = int(w[1])
 
 				#print wRepID + ' ' + self.name + ' ' + str(rV)
 				if wRepID not in rV or rV[wRepID] < wAcceptT:
 					print "Seding tentative " + repr(w) + ' ' + self.name + ' ' + str(self.index)
 					self.send(sock, 'TENTATIVE ' + repr(w))
 		if self.retire:
+			self.send(sock, 'RETIRE ' + str(self.name))
 			sys.exit(0)
 
 
