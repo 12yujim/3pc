@@ -36,6 +36,7 @@ class Server(Thread):
 		self.LC  = 0				# Keeps track of our most recent accept-order.
 		self.CSN = 0				# Keeps track of the current commit sequence number.
 		self.primary = False
+		self.retire = False
 		self.name = ''
 
 		if (self.index == 0):
@@ -44,6 +45,7 @@ class Server(Thread):
 			self.VC[self.name] = self.LC
 		else:
 			self.VC["BD"] = 0
+
 
 
 		self.my_sock = socket(AF_INET, SOCK_STREAM)
@@ -172,7 +174,7 @@ class Server(Thread):
 							response = 'getResp '
 
 							# If we don't have the key logged, return ERR_KEY
-							if VN != self.VN[songName]:
+							if songName in self.VN and VN != self.VN[songName]:
 								response += '<' + songName + ':ERR_DEP>'
 							else:
 								if not songName in self.database:
@@ -263,7 +265,9 @@ class Server(Thread):
 
 
 						elif (received[0] == "retire"):
-							pass
+							# set retirement to True to exit after next anti-entropy
+							self.tentative_log.append((self.LC, self.name, 'retire ' + str(self.index)))
+							self.retire = True
 
 						elif (received[0] == "anti-entropy"):
 							#Send to a random server in our list.
@@ -384,7 +388,7 @@ class Server(Thread):
 
 		# Split the last element based on ,
 		comp1 = comp1[:len(comp1)-1] + comp1[len(comp1)-1].split(',') 
-		comp2 = comp2[:len(comp1)-1] + comp2[len(comp1)-1].split(',') 
+		comp2 = comp2[:len(comp2)-1] + comp2[len(comp2)-1].split(',') 
 
 		# Compare each element
 		for elm1, elm2 in zip(comp1, comp2):
@@ -427,27 +431,32 @@ class Server(Thread):
 			# 	# rollback DB to self.O
 			# 	self.rollback()
 			# 	self.send(sock, ' '.join([self.db, self.o, self.OSN])) # TODO: data transfer protocol (what should R expect to receive)
-			if rCSN < self.CSN:
-				unknownCommits = rCSN # we assume CSN points to most recent (see TODO below)
-				while unknownCommits < self.CSN:
-					w = self.commited_log[unknownCommits]
-					# TODO: should self.CSN point to most recent, or next spot (and therefore not indexed in writelog)
-					# TODO 2: depending on how writes are ordered our message to R can simply be w
-					wCSN = int(w[0])
-					wAcceptT = int(w[1])
-					wRepID = w[2]
-					if wRepID in rV and int(wAcceptT) <= rV[wRepID]:
-						# do we need to include R in the commit? 
-						self.send(sock, 'COMMIT ' + ' '.join([wCSN, wAcceptT, wRepID]))
-					else:
-						self.send(sock, w)
+			# if rCSN < self.CSN:
+			# 	unknownCommits = rCSN # we assume CSN points to most recent (see TODO below)
+			# 	while unknownCommits < self.CSN:
+			# 		w = self.commited_log[unknownCommits]
+			# 		# TODO: should self.CSN point to most recent, or next spot (and therefore not indexed in writelog)
+			# 		# TODO 2: depending on how writes are ordered our message to R can simply be w
+			# 		wCSN = int(w[0])
+			# 		wAcceptT = int(w[1])
+			# 		wRepID = w[2]
+			# 		if wRepID in rV and int(wAcceptT) <= rV[wRepID]:
+			# 			# do we need to include R in the commit? 
+			# 			self.send(sock, 'COMMIT ' + ' '.join([wCSN, wAcceptT, wRepID]))
+			# 		else:
+			# 			self.send(sock, w)
+			#	unknownCommits += 1
 			# Send all tentative writes.
 			for w in self.tentative_log:
 				wAcceptT = int(w[0])
 				wRepID = w[1]
-				if rV[wRepID] < wAcceptT:
-					print "Sending tentative " + repr(w) + ' ' + self.name + ' ' + str(self.index)
+
+				#print wRepID + ' ' + self.name + ' ' + str(rV)
+				if wRepID not in rV or rV[wRepID] < wAcceptT:
+					print "Seding tentative " + repr(w) + ' ' + self.name + ' ' + str(self.index)
 					self.send(sock, 'TENTATIVE ' + repr(w))
+		if self.retire:
+			sys.exit(0)
 
 
 
