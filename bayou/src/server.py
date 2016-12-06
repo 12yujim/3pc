@@ -35,6 +35,7 @@ class Server(Thread):
 		self.LC  = 0				# Keeps track of our most recent accept-order.
 		self.CSN = 0				# Keeps track of the current commit sequence number.
 		self.primary = False
+		self.retire = False
 		self.name = ''
 
 		if (self.index == 0):
@@ -43,6 +44,7 @@ class Server(Thread):
 			self.VC[self.name] = self.LC
 		else:
 			self.VC["BD"] = 0
+
 
 
 		self.my_sock = socket(AF_INET, SOCK_STREAM)
@@ -259,7 +261,9 @@ class Server(Thread):
 
 
 						elif (received[0] == "retire"):
-							pass
+							# set retirement to True to exit after next anti-entropy
+							self.tentative_log.append((self.LC, self.name, 'retire ' + str(self.index)))
+							self.retire = True
 
 						elif (received[0] == "anti-entropy"):
 							#Send to a random server in our list.
@@ -431,6 +435,8 @@ class Server(Thread):
 				if rV[wRepID] < wAcceptT:
 					print "Seding tentative " + repr(w) + ' ' + self.name + ' ' + str(self.index)
 					self.send(sock, 'TENTATIVE ' + repr(w))
+		if self.retire:
+			sys.exit(0)
 
 
 	# Apply all writes in the log to our database/VC logs.
