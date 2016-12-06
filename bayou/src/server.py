@@ -174,7 +174,9 @@ class Server(Thread):
 							response = 'getResp '
 
 							# If we don't have the key logged, return ERR_KEY
-							if songName in self.VN and VN != self.VN[songName]:
+							# only ERR_DEP if received VN is greater than our VN
+							if songName in self.VN and VN > self.VN[songName]:
+								self.send(self.master, "VN: {} VN[songName]: {}".format(VN, self.VN[songName]))
 								response += '<' + songName + ':ERR_DEP>'
 							else:
 								if not songName in self.database:
@@ -295,7 +297,8 @@ class Server(Thread):
 
 						elif (received[0] == "COMMIT"):
 							# Could be data commit or already in our logs. Remove from tent and add to commit.
-							w = (received[1], received[2], received[3])
+							#self.send(self.master, "COMMIT " + data.strip())
+							w = eval(' '.join(received[1:]))
 							i = 0
 							while i < len(self.commited_log):
 								currW = self.commited_log[i]
@@ -352,6 +355,8 @@ class Server(Thread):
 
 	def send(self, sock, s):
 		sock.send(str(s) + '\n')
+		# sleep to avoid message overload
+		time.sleep(0.1)
 
 
 	def insert_tentative(self, new_entry):
@@ -418,7 +423,6 @@ class Server(Thread):
 	# anti-entropy protocol for S to R
 	# after sending initiate message, compare logs and send updates
 	# should be run similar to a heartbeat function
-	# TODO: interruptions during anti-entropy? can create anti-entropy receive function that ignores all commands outside anti-entropy
 	def anti_entropyS(self, sock, data=None):
 		if not data:
 			# initiate anti-entropy
@@ -427,25 +431,12 @@ class Server(Thread):
 			# have received response from R
 			rCSN = int(data[0])
 			rV = eval(' '.join(data[1:]))
-			# if self.OSN > rCSN:
-			# 	# rollback DB to self.O
-			# 	self.rollback()
-			# 	self.send(sock, ' '.join([self.db, self.o, self.OSN])) # TODO: data transfer protocol (what should R expect to receive)
 			# if rCSN < self.CSN:
 			# 	unknownCommits = rCSN # we assume CSN points to most recent (see TODO below)
 			# 	while unknownCommits < self.CSN:
 			# 		w = self.commited_log[unknownCommits]
-			# 		# TODO: should self.CSN point to most recent, or next spot (and therefore not indexed in writelog)
-			# 		# TODO 2: depending on how writes are ordered our message to R can simply be w
-			# 		wCSN = int(w[0])
-			# 		wAcceptT = int(w[1])
-			# 		wRepID = w[2]
-			# 		if wRepID in rV and int(wAcceptT) <= rV[wRepID]:
-			# 			# do we need to include R in the commit? 
-			# 			self.send(sock, 'COMMIT ' + ' '.join([wCSN, wAcceptT, wRepID]))
-			# 		else:
-			# 			self.send(sock, w)
-			#	unknownCommits += 1
+			# 		self.send(sock, 'COMMIT ' + repr(w))
+			# 	unknownCommits += 1
 			# Send all tentative writes.
 			for w in self.tentative_log:
 				wAcceptT = int(w[0])
