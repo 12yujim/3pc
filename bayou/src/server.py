@@ -25,6 +25,7 @@ class Server(Thread):
 
 		self.server_socks   = []	# Current list of sockets we are connected to.
 		self.known_servers  = []	# Current list of known server ids.
+		self.commit_VC		= {}
 		self.VC = {}				# Vector clock for every server with the most recent accept-order, format (server_name, accept_num)
 		self.tentative_log  = [] 	# Format is (accept_timestamp, name, write_info)
 		self.commited_log   = []	# Format is (CSN, accept_timestamp, name, write_info)
@@ -225,6 +226,8 @@ class Server(Thread):
 								self.LC   = int(received[1][1:received[1].index(',')]) + 1
 								self.VC[received[2]] = 0
 								self.VC[self.name]   = self.LC
+								self.commit_VC[self.name] = self.LC
+								self.commit_VC[received[2]] = self.LC
 
 								self.server_socks.append((int(received[3]), sock))
 								self.known_servers.append(int(received[3]))
@@ -239,16 +242,17 @@ class Server(Thread):
 								else:
 									# Add this entry to our log and respond with the new server's name.
 									new_name = "<" + str(self.LC) + "," + self.name + ">"
-									self.tentative_log.append((self.LC, self.name, "create " + new_name))
+									self.tentative_log.append((self.LC, self.name, "create " + new_name + ' ' + received[1]))
 
 									# Initialize a VC entry for this server.
 									self.VC[new_name] = self.LC
-									self.LC += 1
 									self.VC[self.name] = self.LC
+									self.commit_VC[self.name] = self.LC
+									self.commit_VC[new_name] = self.LC
 
 									self.send(self.master, "Creating new name " + str(self.index))
 
-									self.server_socks.append((int(received[1]), connect_sock))
+									self.server_socks.append((int(received[1]), sock))
 									self.known_servers.append(int(received[1]))
 									
 									self.send(sock, "create " + new_name + ' ' + self.name + ' ' + str(self.index))
@@ -269,10 +273,17 @@ class Server(Thread):
 
 								# send CSN and VC (flipped order for simplicity)
 								startmsg = 'BEGIN ' + str(self.CSN) + ' ' + str(self.VC)
+								updatemsg = 'updateVC ' + str(self.commit_VC)
 
 								self.send(pair[1], startmsg)
+								self.send(pair[1], updatemsg)
 							except:
 								pass
+
+						elif (received[0] == "updateVC"):
+							crV = eval(' '.join(received[1:]))
+							#print "Updating Commit_VC"
+							self.commit_VC.update(dict((key, max(self.commit_VC[key], crV[key])) for key in list(set(self.commit_VC) & set(crV))))
 
 						elif (received[0] == 'BEGIN'):
 							#self.send(self.master, "entering anti-entropy")
@@ -293,6 +304,7 @@ class Server(Thread):
 
 						elif (received[0] == "TENTATIVE"):
 							w = eval(' '.join(received[1:]))
+							entry = w[2].split(' ')
 							print "received tentative " + repr(w) + ' ' + str(self.index)
 							self.insert_tentative(w)
 
@@ -304,9 +316,15 @@ class Server(Thread):
 							self.VC[w[1]] = int(w[0])
 							self.LC = max(int(w[0]), self.LC + 1)
 							self.VC[self.name] = self.LC
+							self.commit_VC[self.name] = self.LC
+							self.VN[entry[1]]  = self.VC[w[1]]
 							print str(self.VC) + ' ' + str(self.index)
+							print str(self.VN) + ' ' + str(self.index)
 							print str(self.tentative_log) + ' ' + str(self.index)
-							# self.VN[songName] = VN[songName]
+							
+							# Try to commit new things
+							if (self.primary):
+								self.commit_writes()
 
 
 						elif (received[0] == "printLog"):
@@ -385,7 +403,7 @@ class Server(Thread):
 		# Iterate through the tentative write log and commit anything without dependent writes elsewhere.
 		for entry in self.tentative_log:
 			# Commit every entry with a accept time lower than the lowest in VC.
-			if self.VC.values() and (entry[0] <= min(self.VC.values())):
+			if self.commit_VC.values() and (entry[0] <= min(self.commit_VC.values())):
 				self.tentative_log.remove(entry)
 				self.commited_log.append((self.CSN, entry[0], entry[1], entry[2]))
 				self.CSN += 1
@@ -409,33 +427,49 @@ class Server(Thread):
 			# 	# rollback DB to self.O
 			# 	self.rollback()
 			# 	self.send(sock, ' '.join([self.db, self.o, self.OSN])) # TODO: data transfer protocol (what should R expect to receive)
-			# if rCSN < self.CSN:
-			# 	unknownCommits = rCSN # we assume CSN points to most recent (see TODO below)
-			# 	while unknownCommits < self.CSN:
-			# 		w = self.commited_log[unknownCommits]
-			# 		# TODO: should self.CSN point to most recent, or next spot (and therefore not indexed in writelog)
-			# 		# TODO 2: depending on how writes are ordered our message to R can simply be w
-			# 		wCSN = int(w[0])
-			# 		wAcceptT = int(w[1])
-			# 		wRepID = w[2]
-			# 		if wRepID in rV and int(wAcceptT) <= rV[wRepID]:
-			# 			# do we need to include R in the commit? 
-			# 			self.send(sock, 'COMMIT ' + ' '.join([wCSN, wAcceptT, wRepID]))
-			# 		else:
-			# 			self.send(sock, w)
+			if rCSN < self.CSN:
+				unknownCommits = rCSN # we assume CSN points to most recent (see TODO below)
+				while unknownCommits < self.CSN:
+					w = self.commited_log[unknownCommits]
+					# TODO: should self.CSN point to most recent, or next spot (and therefore not indexed in writelog)
+					# TODO 2: depending on how writes are ordered our message to R can simply be w
+					wCSN = int(w[0])
+					wAcceptT = int(w[1])
+					wRepID = w[2]
+					if wRepID in rV and int(wAcceptT) <= rV[wRepID]:
+						# do we need to include R in the commit? 
+						self.send(sock, 'COMMIT ' + ' '.join([wCSN, wAcceptT, wRepID]))
+					else:
+						self.send(sock, w)
 			# Send all tentative writes.
 			for w in self.tentative_log:
 				wAcceptT = int(w[0])
 				wRepID = w[1]
-				#print wRepID + ' ' + self.name + ' ' + str(rV)
 				if rV[wRepID] < wAcceptT:
-					print "Seding tentative " + repr(w) + ' ' + self.name + ' ' + str(self.index)
+					print "Sending tentative " + repr(w) + ' ' + self.name + ' ' + str(self.index)
 					self.send(sock, 'TENTATIVE ' + repr(w))
+
 
 
 	# Apply all writes in the log to our database/VC logs.
 	def process_writes(self):
-		pass
+		for entry in self.tentative_log:
+			m = entry[2].split(' ')
+			if (m[0] == "add"):
+				self.database[m[1]] = m[2]
+			elif (m[0] == "delete"):
+				del self.database[m[1]]
+			elif (m[0] == "create"):
+				print "Processing create " + str(self.index)
+				if not (int(m[2]) in self.known_servers):
+					self.known_servers.append(int(m[2]))
+					print str(self.known_servers)
+					self.VC[m[1]] = int(m[1][1:m[1].index(',')]) + 1
+			elif (m[0] == "retire"):
+				if (int(m[2]) in self.known_servers):
+					self.known_servers.remove(int(m[2]))
+					del self.VC[m[1]]
+
 
 	def parse_info(self, s):
 		m = s.split(' ')
