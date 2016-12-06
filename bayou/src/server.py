@@ -50,6 +50,7 @@ class Server(Thread):
 
 		self.my_sock = socket(AF_INET, SOCK_STREAM)
 		self.my_sock.setsockopt(SOL_SOCKET, SO_REUSEADDR, 1)
+		self.my_sock.settimeout(1)
 
 		self.master = socket(AF_INET, SOCK_STREAM)
 		self.master.setsockopt(SOL_SOCKET, SO_REUSEADDR, 1)
@@ -88,6 +89,7 @@ class Server(Thread):
 			for sock in active:
 				if (sock == self.my_sock):
 					(newsock, port) = self.my_sock.accept()
+					print('added new socket')
 					self.comm_channels.append(newsock)
 
 					# Send a create message if we don't have a name.
@@ -208,7 +210,6 @@ class Server(Thread):
 									self.server_socks.append((int(i), connect_sock))
 
 									self.send(connect_sock, "create " + str(self.index))
-									time.sleep(0.1)
 								
 
 						elif (received[0] == "breakConn"):
@@ -334,6 +335,9 @@ class Server(Thread):
 							if (self.primary):
 								self.commit_writes()
 
+						elif (received[0] == "RETIRE"):
+							self.primary = True
+
 
 						elif (received[0] == "printLog"):
 							out = 'log '
@@ -447,13 +451,14 @@ class Server(Thread):
 			# Send all tentative writes.
 			for w in self.tentative_log:
 				wAcceptT = int(w[0])
-				wRepID = w[1]
+				wRepID = int(w[1])
 
 				#print wRepID + ' ' + self.name + ' ' + str(rV)
 				if wRepID not in rV or rV[wRepID] < wAcceptT:
 					print "Seding tentative " + repr(w) + ' ' + self.name + ' ' + str(self.index)
 					self.send(sock, 'TENTATIVE ' + repr(w))
 		if self.retire:
+			self.send(sock, 'RETIRE ' + str(self.name))
 			sys.exit(0)
 
 
