@@ -370,7 +370,7 @@ class Server(Thread):
 
 		# Split the last element based on ,
 		comp1 = comp1[:len(comp1)-1] + comp1[len(comp1)-1].split(',') 
-		comp2 = comp2[:len(comp1)-1] + comp2[len(comp1)-1].split(',') 
+		comp2 = comp2[:len(comp2)-1] + comp2[len(comp2)-1].split(',') 
 
 		# Compare each element
 		for elm1, elm2 in zip(comp1, comp2):
@@ -427,12 +427,13 @@ class Server(Thread):
 			# 			self.send(sock, 'COMMIT ' + ' '.join([wCSN, wAcceptT, wRepID]))
 			# 		else:
 			# 			self.send(sock, w)
+			#	unknownCommits += 1
 			# Send all tentative writes.
 			for w in self.tentative_log:
 				wAcceptT = int(w[0])
 				wRepID = w[1]
 				#print wRepID + ' ' + self.name + ' ' + str(rV)
-				if rV[wRepID] < wAcceptT:
+				if wRepID not in rV or rV[wRepID] < wAcceptT:
 					print "Seding tentative " + repr(w) + ' ' + self.name + ' ' + str(self.index)
 					self.send(sock, 'TENTATIVE ' + repr(w))
 		if self.retire:
