@@ -122,7 +122,6 @@ class Client(Thread):
 
 						elif (received[0] == "VNupdate"):
 							# Update our VC with the most recent version at a server.
-							self.send(self.master, "VN update " + str(self.index))
 							self.VN[received[1]] = int(received[2])
 
 						elif (received[0] == "getResp"):

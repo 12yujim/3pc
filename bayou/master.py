@@ -130,9 +130,8 @@ def main():
             if cmd == 'get' or cmd == 'printLog': # get chatLog
                 send(pid, sp1[1], set_wait=True)
             else: # other commands
-                print cmd
                 send(pid, sp1[1], set_wait=False)
-        time.sleep(1)
+        time.sleep(4)
 
 if __name__ == '__main__':
     if len(sys.argv) > 1 and sys.argv[1] == 'debug':

@@ -84,18 +84,15 @@ class Server(Thread):
 
 		while(1):
 			# timeout every 3 seconds for heartbeat
-			(active, _, _) = select(self.comm_channels, [], [], 3)
+			(active, _, _) = select(self.comm_channels, [], [])
 
 			for sock in active:
 				if (sock == self.my_sock):
 					(newsock, port) = self.my_sock.accept()
-					print('added new socket')
 					self.comm_channels.append(newsock)
 
 					# Send a create message if we don't have a name.
 					if (self.name == ''):
-						print "Sending create " + str(self.index)
-
 						self.send(newsock, "create " + str(self.index))
 
 				else:
@@ -106,22 +103,19 @@ class Server(Thread):
 						continue
 					
 					if line == '':
-						self.send(self.master, "Socket closed " + str(self.index))
 						self.comm_channels.remove(sock)
 
 						# Remove this socket if its in our server list.
 						for (i, s) in self.server_socks:
 							if s is sock:
-								print "removing sock id " + str(i) + ' ' + str(self.index)
 								self.server_socks.remove((i,s))
 
 					for data in line.split('\n'):
 						if data == '':
 							continue
 
-						received = data.strip().split(' ')
+						received = data.strip().strip('\r').split(' ')
 						if (received[0] == "add"):
-							self.send(self.master, "Got add command " + ' '.join(received))
 							songName = received[1]
 							URL = received[2]
 							VN  = int(received[3])
@@ -129,8 +123,33 @@ class Server(Thread):
 							# Apply the add/modify to our database and write it to the log tentatively.
 							self.LC = max(self.LC + 1, VN)
 							self.VC[self.name] = self.LC
+							self.commit_VC[self.name] = self.LC
 
 							self.database[songName] = URL
+							self.VN[songName] = self.LC
+							self.tentative_log.append((self.LC, self.name, ' '.join(received[:4])))
+
+							# Send the updated VN if we used our LC
+							if self.LC != VN:
+								self.send(sock, 'VNupdate ' + songName + ' ' + str(self.LC))
+								self.comm_channels.remove(sock)
+								sock.close()
+
+							# Try to commit if we are the primary.
+							if (self.primary):
+								self.commit_writes()
+
+
+						elif (received[0] == "delete"):
+							songName = received[1]
+							VN = int(received[2])
+
+							# Apply the add/modify to our database and write it to the log tentatively.
+							self.LC = max(self.LC + 1, VN)
+							self.VC[self.name] = self.LC
+							self.commit_VC[self.name] = self.LC
+
+							del self.database[songName]
 							self.VN[songName] = self.LC
 							self.tentative_log.append((self.LC, self.name, ' '.join(received[:3])))
 
@@ -145,32 +164,7 @@ class Server(Thread):
 								self.commit_writes()
 
 
-						elif (received[0] == "delete"):
-							self.send(self.master, "Got delete command " + str(self.index))
-							songName = received[1]
-							VN = int(received[2])
-
-							# Apply the add/modify to our database and write it to the log tentatively.
-							self.LC = max(self.LC + 1, VN)
-							self.VC[self.name] = self.LC
-
-							del self.database[songName]
-							self.VN[songName] = self.LC
-							self.tentative_log.append((self.LC, self.name, ' '.join(received[:2])))
-
-							# Send the updated VN if we used our LC
-							if self.LC != VN:
-								self.send(sock, 'VNupdate ' + songName + ' ' + str(self.LC))
-								self.comm_channels.remove(sock)
-								sock.close()
-
-							# Try to commit if we are the primary.
-							if (self.primary):
-								self.commit_writes()
-
-
 						elif (received[0] == "get"):
-							self.send(self.master, "Got get command " + str(self.index))
 							songName = received[1]
 							VN = int(received[2])
 							response = 'getResp '
@@ -178,7 +172,6 @@ class Server(Thread):
 							# If we don't have the key logged, return ERR_KEY
 							# only ERR_DEP if received VN is greater than our VN
 							if songName in self.VN and VN > self.VN[songName]:
-								self.send(self.master, "VN: {} VN[songName]: {}".format(VN, self.VN[songName]))
 								response += '<' + songName + ':ERR_DEP>'
 							else:
 								if not songName in self.database:
@@ -217,7 +210,6 @@ class Server(Thread):
 							for i in received[1:]:
 								for (ID, sock1) in self.server_socks:
 									if ID == int(i):
-										print "Removing sock id " + str(ID) + ' ' + str(self.index)
 										self.server_socks.remove((ID, sock1))
 										self.comm_channels.remove(sock1)
 										sock1.close()
@@ -228,7 +220,7 @@ class Server(Thread):
 								# Record our new name and set our LC, also create an entry in our VC table for ID.
 								# TODO: The responding server should actually bring us up to date with its logs.
 								self.name = received[1]
-								print received
+				
 								self.LC   = int(received[1][1:received[1].index(',')]) + 1
 								self.VC[received[2]] = 0
 								self.VC[self.name]   = self.LC
@@ -237,12 +229,12 @@ class Server(Thread):
 
 								self.server_socks.append((int(received[3]), sock))
 								self.known_servers.append(int(received[3]))
+								# Also add 0 because we will never see its creation message.
+								if not 0 in self.known_servers:
+									self.known_servers.append(0)
 								
-								self.send(self.master, "Adding new name " + str(self.index) + ' ' + received[3])
-
 							else:
 								if (int(received[1]) in self.known_servers):
-									print "Just appending create " + str(self.index)
 									self.server_socks.append((int(received[1]), sock))
 
 								else:
@@ -255,8 +247,7 @@ class Server(Thread):
 									self.VC[self.name] = self.LC
 									self.commit_VC[self.name] = self.LC
 									self.commit_VC[new_name] = self.LC
-
-									self.send(self.master, "Creating new name " + str(self.index))
+									self.LC += 1
 
 									self.server_socks.append((int(received[1]), sock))
 									self.known_servers.append(int(received[1]))
@@ -270,18 +261,22 @@ class Server(Thread):
 
 						elif (received[0] == "retire"):
 							# set retirement to True to exit after next anti-entropy
-							self.tentative_log.append((self.LC, self.name, 'retire ' + str(self.index)))
+							self.LC += 1
+							self.VC[self.name] = self.LC
+							self.commit_VC[self.name] = self.LC
+
+							self.tentative_log.append((self.LC, self.name, 'retire ' + self.name + ' ' + str(self.index)))
 							self.retire = True
 
 						elif (received[0] == "anti-entropy"):
 							#Send to a random server in our list.
 							try:
 								pair = random.choice(self.server_socks)
-								#print "Starting entropy from " + str(pair[0]) + ' to ' + self.name
 
 								# send CSN and VC (flipped order for simplicity)
-								startmsg = 'BEGIN ' + str(self.CSN) + ' ' + str(self.VC)
 								updatemsg = 'updateVC ' + str(self.commit_VC)
+								startmsg = 'BEGIN ' + str(self.CSN) + ' ' + str(self.VC)
+								#print "Starting entropy from " + str(pair[0]) + ' to ' + self.name + ' ' + startmsg
 
 								self.send(pair[1], startmsg)
 								self.send(pair[1], updatemsg)
@@ -290,8 +285,30 @@ class Server(Thread):
 
 						elif (received[0] == "updateVC"):
 							crV = eval(' '.join(received[1:]))
-							#print "Updating Commit_VC"
+
+							# Update the commit vectors for each process (this represents every processes current LC)
 							self.commit_VC.update(dict((key, max(self.commit_VC[key], crV[key])) for key in list(set(self.commit_VC) & set(crV))))
+
+							# Make sure there is no retire entry for the missing entries.
+							if (len(list(set(crV) - set(self.commit_VC))) > 0):
+								retired = dict((key, False) for key in list(set(crV) - set(self.commit_VC)))
+								for entry in (self.commited_log + self.tentative_log):
+									if (len(entry) == 4):
+										m = entry[3].split(' ')
+									else:
+										m = entry[2].split(' ')
+
+									if m[0] == 'retire' and (m[1] in retired.keys()):
+										retired[m[1]] = True
+
+								for key in retired:
+									if not retired[key]:
+										self.commit_VC[key] = crV[key]
+
+							# Try to commit new things
+							if (self.primary):
+								#print "Commiting after update! " + str(self.index) + ' ' + str(self.commit_VC)
+								self.commit_writes()
 
 						elif (received[0] == 'BEGIN'):
 							#self.send(self.master, "entering anti-entropy")
@@ -301,20 +318,36 @@ class Server(Thread):
 							# Could be data commit or already in our logs. Remove from tent and add to commit.
 							#self.send(self.master, data.strip())
 							w = eval(' '.join(received[1:]))
-							i = 0
-							while i < len(self.commited_log):
-								currW = self.commited_log[i]
-								if currW[0] > w[0]:
-									break
-								i += 1
-							self.commited_log.insert(i, w)
+							entry = w[2].split(' ')
+
+							found = False
+							# Remove if already in our tentative log.
+							for entry in self.tentative_log:
+								if entry == w[1:]:
+									found = True
+									self.tentative_log.remove(entry)
+
+							self.commited_log.append(w)
 							# TODO: should this be incremented?
 							self.CSN += 1
+
+							if not found:
+								# Reapply all writes in the new order.
+								self.process_writes()
+
+								# TODO: not sure about this
+								# Update LC, VC and VN! for the specified server name
+								self.LC = max(self.LC + 1, int(w[1]))
+								self.VC[w[2]] = int(w[1])
+								if (entry[0] == 'add' or entry[0] == 'delete'):
+									self.VN[entry[1]] = int(w[1])
+
+								self.commit_VC[self.name] = self.LC
 
 						elif (received[0] == "TENTATIVE"):
 							w = eval(' '.join(received[1:]))
 							entry = w[2].split(' ')
-							print "received tentative " + repr(w) + ' ' + str(self.index)
+							#print "received tentative " + repr(w) + ' ' + str(self.index)
 							self.insert_tentative(w)
 
 							# Reapply all writes in the new order.
@@ -322,14 +355,12 @@ class Server(Thread):
 
 							# TODO: not sure about this
 							# Update LC, VC and VN! for the specified server name
+							self.LC = max(self.LC + 1, int(w[0]))
 							self.VC[w[1]] = int(w[0])
-							self.LC = max(int(w[0]), self.LC + 1)
-							self.VC[self.name] = self.LC
+							if (entry[0] == 'add' or entry[0] == 'delete'):
+								self.VN[entry[1]] = int(w[0])
+
 							self.commit_VC[self.name] = self.LC
-							self.VN[entry[1]]  = self.VC[w[1]]
-							print str(self.VC) + ' ' + str(self.index)
-							print str(self.VN) + ' ' + str(self.index)
-							print str(self.tentative_log) + ' ' + str(self.index)
 							
 							# Try to commit new things
 							if (self.primary):
@@ -341,17 +372,20 @@ class Server(Thread):
 
 						elif (received[0] == "printLog"):
 							out = 'log '
+							message = []
 
 							# Record those stable writes in the commit log.
 							for entry in self.commited_log:
 								# Parse the write_info
 								info = self.parse_info(entry[3])
-								out += '<' + info[0] + ':(' + info[1] + '):TRUE>'
+								message.append(info[0] + ':(' + info[1] + '):TRUE')
 							# Record those tentative writes in the log.
 							for entry in self.tentative_log:
 								# Parse the write info
 								info = self.parse_info(entry[2])
-								out += '<' + info[0] + ':(' + info[1] + '):FALSE>'
+								message.append(info[0] + ':(' + info[1] + '):FALSE')
+
+							out += ','.join(message)
 
 							self.send(sock, out)
 							#self.send(self.master, "testCommitLog " + str(self.commited_log))
@@ -362,7 +396,6 @@ class Server(Thread):
 	def send(self, sock, s):
 		sock.send(str(s) + '\n')
 		# sleep to avoid message overload
-		time.sleep(0.1)
 
 
 	def insert_tentative(self, new_entry):
@@ -414,18 +447,18 @@ class Server(Thread):
 	# Commit writes, deletes, creates, and retirements. This function is run after each of these operations and after
 	# anti-entropy. Writes may or may not be commited based on if we have the writes casually preceding them. (Primary only)
 	def commit_writes(self):
-		self.send(self.master, "Commiting writes... " + str(self.index))
+		#self.send(self.master, "Commiting writes... " + str(self.index))
 		# Iterate through the tentative write log and commit anything without dependent writes elsewhere.
 		i = 0
 		while i < len(self.tentative_log):
 			# use i to avoid list removal errors in python
 			entry = self.tentative_log[i]
+
 			# Commit every entry with a accept time lower than the lowest in VC.
 			if self.commit_VC.values() and (entry[0] <= min(self.commit_VC.values())):
 				self.tentative_log.pop(i)
 				self.commited_log.append((self.CSN, entry[0], entry[1], entry[2]))
 				self.CSN += 1
-				self.send(self.master, "Committed write " + str(self.CSN) + ' ' + str(entry[0]) + ' ' + entry[1] + ' ' + entry[2])
 			else:
 				i += 1
 
@@ -435,6 +468,9 @@ class Server(Thread):
 	# after sending initiate message, compare logs and send updates
 	# should be run similar to a heartbeat function
 	def anti_entropyS(self, sock, data=None):
+		if self.retire and self.primary:
+			self.send(sock, 'RETIRE ' + str(self.name))
+
 		if not data:
 			# initiate anti-entropy
 			self.send(sock, 'anti-entropy')
@@ -442,6 +478,7 @@ class Server(Thread):
 			# have received response from R
 			rCSN = int(data[0])
 			rV = eval(' '.join(data[1:]))
+			#print str(rCSN) + ' ' + str(self.CSN) + ' ' + str(self.index)
 			if rCSN < self.CSN:
 				unknownCommits = rCSN # we assume CSN points to most recent (see TODO below)
 				while unknownCommits < self.CSN:
@@ -455,32 +492,40 @@ class Server(Thread):
 
 				#print wRepID + ' ' + self.name + ' ' + str(rV)
 				if wRepID not in rV or rV[wRepID] < wAcceptT:
-					print "Seding tentative " + repr(w) + ' ' + self.name + ' ' + str(self.index)
+					#print "Seding tentative " + repr(w) + ' ' + self.name + ' ' + str(self.index)
 					self.send(sock, 'TENTATIVE ' + repr(w))
+
 		if self.retire:
-			self.send(sock, 'RETIRE ' + str(self.name))
 			sys.exit(0)
 
 
 
 	# Apply all writes in the log to our database/VC logs.
 	def process_writes(self):
-		for entry in self.tentative_log:
-			m = entry[2].split(' ')
+		for entry in (self.commited_log + self.tentative_log):
+			if (len(entry) == 4):
+				m = entry[3].split(' ')
+			else:
+				m = entry[2].split(' ')
+
 			if (m[0] == "add"):
+				#print 'adding ' + m[1] + ' with ' + m[2] + ' ' + str(self.index)
 				self.database[m[1]] = m[2]
 			elif (m[0] == "delete"):
+				#print 'deleting ' + m[1] + ' ' + str(self.index)
 				del self.database[m[1]]
 			elif (m[0] == "create"):
-				print "Processing create " + str(self.index)
+				#print "Processing create " + str(self.index)
 				if not (int(m[2]) in self.known_servers):
 					self.known_servers.append(int(m[2]))
-					print str(self.known_servers)
+					#print str(self.known_servers)
 					self.VC[m[1]] = int(m[1][1:m[1].index(',')]) + 1
 			elif (m[0] == "retire"):
 				if (int(m[2]) in self.known_servers):
+					#print "Removing process " + m[1]
 					self.known_servers.remove(int(m[2]))
 					del self.VC[m[1]]
+					del self.commit_VC[m[1]]
 
 
 	def parse_info(self, s):
@@ -504,8 +549,8 @@ def anti_entropy_heartbeat(port):
 	connection.connect((address, port))
 
 	while(True):
-		# Sleep for .05 second intervals and send a initiate message to all servers.
-		time.sleep(1)
+		# Sleep for .5 second intervals and send a initiate message to all servers.
+		time.sleep(.2)
 		connection.send("anti-entropy\n")
 
 
